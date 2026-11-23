@@ -39,7 +39,7 @@ fragment ListFields on ShoppingList {
       quantity
       quantityUnit
       sokId
-      product { pricing { currentPrice } location { aisle label } }
+      product { pricing { currentPrice } location { aisle label name } }
     }
   }
 }";
@@ -152,6 +152,7 @@ pub struct Pricing {
 pub struct Location {
     pub aisle: Option<String>,
     pub label: Option<String>,
+    pub name: Option<String>,
 }
 
 /// Fields to change on an item; unset fields are left as they are.

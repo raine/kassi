@@ -686,8 +686,21 @@ fn item_view(item: &Item) -> Value {
         "price_eur": product
             .and_then(|p| p.pricing.as_ref())
             .and_then(|pricing| pricing.current_price),
-        "aisle": location.and_then(|l| l.aisle.clone()),
-        "section": location.and_then(|l| l.label.clone()),
+        "location": location.map(|l| {
+            place(l.aisle.as_deref(), l.label.as_deref(), l.name.as_deref())
+        }),
+    }))
+}
+
+/// Where a product sits in the store. Products in a labelled department,
+/// such as MAITO-OSASTO or HEDELMÄT VIHANNEKSET, carry the department's
+/// internal code in `aisle` rather than an aisle number, so only the label is
+/// shown for them.
+fn place(aisle: Option<&str>, department: Option<&str>, shelf: Option<&str>) -> Value {
+    prune(json!({
+        "aisle": department.is_none().then_some(aisle).flatten(),
+        "department": department,
+        "shelf": shelf,
     }))
 }
 
@@ -759,19 +772,21 @@ fn product_view(product: &Value) -> Value {
         "comparison_price_eur": pricing["comparisonPrice"],
         "comparison_unit": product["comparisonUnit"],
         "available": product["available"].as_bool().filter(|a| !a),
-        "aisle": product["location"]["aisle"],
-        "section": product["location"]["label"],
+        "location": place(
+            product["location"]["aisle"].as_str(),
+            product["location"]["label"].as_str(),
+            product["location"]["name"].as_str(),
+        ),
     }))
 }
 
-/// Without a store, the API answers for a reference store, whose aisle means
-/// nothing to the user.
+/// Without a store, the API answers for a reference store, whose location
+/// means nothing to the user.
 fn scoped(mut view: Value, store_id: Option<&str>) -> Value {
     if store_id.is_none()
         && let Some(fields) = view.as_object_mut()
     {
-        fields.remove("aisle");
-        fields.remove("section");
+        fields.remove("location");
     }
     view
 }
@@ -976,13 +991,13 @@ mod tests {
             "pricing": { "currentPrice": 5.99, "regularPrice": 8.49, "comparisonPrice": 11.98,
                 "campaignPrice": 5.99, "campaignPriceValidUntil": "2026-11-30",
                 "lowest30DayPrice": 7.99, "depositPrice": null },
-            "location": { "aisle": "12", "label": "KAHVI" }
+            "location": { "aisle": "12", "label": null, "name": "Kahvi" }
         });
         let view = product_view(&product);
         assert_eq!(view["regular_price_eur"], 8.49);
         assert_eq!(view["campaign_until"], "2026-11-30");
         assert_eq!(view["lowest_30_day_price_eur"], 7.99);
-        assert_eq!(view["aisle"], "12");
+        assert_eq!(view["location"], json!({ "aisle": "12", "shelf": "Kahvi" }));
         for hidden in ["brand", "available", "approximate_price", "deposit_eur"] {
             assert!(view.get(hidden).is_none(), "{hidden}: {view}");
         }
@@ -994,6 +1009,15 @@ mod tests {
         assert!(view.get("regular_price_eur").is_none());
         assert!(view.get("lowest_30_day_price_eur").is_none());
         assert_eq!(view["available"], false);
+    }
+
+    #[test]
+    fn department_replaces_its_internal_aisle_code() {
+        assert_eq!(
+            place(Some("1006"), Some("MAITO-OSASTO"), Some("Ruokajuomat")),
+            json!({ "department": "MAITO-OSASTO", "shelf": "Ruokajuomat" })
+        );
+        assert_eq!(place(None, None, None), json!({}));
     }
 
     #[test]

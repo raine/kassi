@@ -30,9 +30,10 @@ Finland: Prisma, S-market, Alepa, Sale) and searches the stores' products.
 only one list.
 - Read the list before changing items, and use the item ids it returns. Never \
 invent ids.
-- Items are either free text (add_items) or linked products with price and aisle \
-(add_products). Use free text unless the user wants a specific product or asks \
-about prices. To pick a product, search_products with the list's store_id.
+- Items are either free text (add_items) or store products (add_products) with \
+a price and a location: an aisle number or a department, plus the shelf. Use \
+free text unless the user wants a specific product or asks about prices. To \
+pick a product, search_products with the list's store_id.
 - Check items off with update_items (collected: true) rather than removing \
 them, unless the user asks to remove them.
 - Product names and searches are in Finnish; translate the user's request into \
@@ -67,7 +68,7 @@ impl Server {
     }
 
     #[tool(
-        description = "Show the items on a shopping list with their ids and whether they are collected. Product items also show quantity, price, and aisle.",
+        description = "Show the items on a shopping list with their ids and whether they are collected. Product items also show quantity, price, and where they are in the store.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_shopping_list(
@@ -274,7 +275,7 @@ impl Server {
     // Products
 
     #[tool(
-        description = "Search products by name. With store_id: that store's prices, campaigns, availability, and aisle. Without: the whole S-ryhmä assortment.",
+        description = "Search products by name. With store_id: that store's prices, campaigns, availability, and location in the store. Without: the whole S-ryhmä assortment.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_products(
