@@ -20,8 +20,10 @@ change.
 | Stores   | `search_stores`, `get_store`                                                                                                                                                |
 
 Lists hold two kinds of items: free text ("maito") and products linked to an
-item in the store's assortment, which carry a price and aisle. Product search
-with a `store_id` returns that store's prices, campaigns, and aisles.
+item in the store's assortment, which carry a price and their place in the
+store. Product search with a `store_id` returns that store's prices, campaigns,
+and locations: an aisle number or a department such as MAITO-OSASTO, and the
+shelf name.
 
 `purchase_history` lists what you have bought with your S-Etukortti, by
 category, as products at a chosen store with current prices. The API only
@@ -98,6 +100,41 @@ For Claude Desktop, add to `claude_desktop_config.json`:
 }
 ```
 
+### ChatGPT through an OpenAI tunnel
+
+ChatGPT cannot start a local process, but OpenAI's
+[`tunnel-client`](https://github.com/openai/tunnel-client) can run `kassi mcp`
+on your machine and connect it to ChatGPT over an outbound connection, with no
+public port or HTTPS setup.
+
+1. On the [OpenAI Platform](https://platform.openai.com/settings/organization/tunnels),
+   create a tunnel for your ChatGPT workspace and copy its `tunnel_…` ID.
+2. Create an API key restricted to **Tunnels: Read and Use**, and save it in a
+   file readable only by you.
+3. Point `tunnel-client` at kassi:
+
+   ```yaml
+   config_version: 1
+   control_plane:
+     base_url: "https://api.openai.com"
+     tunnel_id: "tunnel_…"
+     api_key: "file:/home/you/.config/kassi-mcp/openai-tunnel-key"
+   mcp:
+     commands:
+       - channel: main
+         command: "/home/you/.local/bin/kassi mcp"
+   ```
+
+   and run `tunnel-client run --config <that file>`, for example as a systemd
+   service.
+4. In ChatGPT, open **Plugins → Add → Add custom MCP server**, choose
+   **Tunnel**, pick the tunnel, and set authentication to **No
+   authentication**.
+
+ChatGPT asks for approval before tools that delete things, such as
+`remove_items` and `delete_shopping_list`. Anyone who can use the plugin in
+your ChatGPT workspace can read and change your lists.
+
 ### Over the network (Streamable HTTP)
 
 ```sh
@@ -111,15 +148,9 @@ either as `Authorization: Bearer <token>` or in the URL as
 so keep it on localhost or a private network (for example Tailscale) and put
 HTTPS in front of it before exposing it.
 
-ChatGPT connectors reach the server from the internet, so they need a public
-HTTPS URL. One option is [Tailscale Funnel](https://tailscale.com/kb/1223/funnel):
-
-```sh
-tailscale funnel --bg 8737
-```
-
-Then add a connector in ChatGPT with the URL
-`https://<pi>.<tailnet>.ts.net/mcp/<token>` and no authentication. The token in
+To reach it from outside your network, put HTTPS in front of it, for example
+with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) (`tailscale funnel
+--bg 8737`), and use `https://<host>/mcp/<token>` as the server URL. The token in
 the URL is the only thing protecting your account, so treat the URL like a
 password.
 
