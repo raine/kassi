@@ -1,0 +1,31 @@
+[package]
+name = "kassi"
+publish = false
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "MCP server for the S-ostoslista shopping list"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+axum = "0.8"
+base64 = "0.22"
+clap = { version = "4.6", features = ["derive", "env"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+schemars = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+subtle = "2.6"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[profile.release]
+strip = true
+lto = "thin"
