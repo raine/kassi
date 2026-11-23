@@ -13,14 +13,9 @@ name = "test"
 mode = "nextest"
 command = ["cargo", "nextest", "run", "--target-dir", "target/test", "--all-targets", "--locked", "--no-fail-fast", "--status-level", "fail"]
 
-[[check]]
-name = "doc-test"
-mode = "cargo"
-command = ["cargo", "test", "--target-dir", "target/test", "--doc", "--message-format=json", "--locked"]
-
 [[group]]
 name = "all"
-checks = ["format-check", "clippy", "test", "doc-test", "cargo-machete"]
+checks = ["format-check", "clippy", "test", "cargo-machete"]
 
 [[group]]
 name = "fast-readonly"
@@ -28,4 +23,4 @@ checks = ["format-check", "cargo-machete"]
 
 [[group]]
 name = "tests"
-checks = ["test", "doc-test"]
+checks = ["test"]

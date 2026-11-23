@@ -1,6 +1,9 @@
 //! Streamable HTTP for `kassi mcp --http`. Every tool is a plain request and
-//! response, so requests are served statelessly as JSON. Every request must
-//! carry the bearer token from `KASSI_MCP_TOKEN`.
+//! response, so requests are served statelessly as JSON.
+//!
+//! Every request must carry the token from `KASSI_MCP_TOKEN`, either as a
+//! bearer token at `/mcp` or in the path as `/mcp/<token>` for clients that
+//! cannot send custom headers.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -75,12 +78,13 @@ fn router(server: Server, token: Arc<str>) -> Router {
         config,
     );
     Router::new()
-        .route_service(ENDPOINT, service)
+        .route_service(ENDPOINT, service.clone())
+        .route_service(&format!("{ENDPOINT}/{{token}}"), service)
         .route_layer(middleware::from_fn_with_state(token, require_token))
 }
 
 async fn require_token(State(token): State<Arc<str>>, request: Request, next: Next) -> Response {
-    if authorized(request.headers(), &token) {
+    if authorized(request.headers(), &token) || path_authorized(request.uri().path(), &token) {
         return next.run(request).await;
     }
     (
@@ -101,6 +105,12 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
     };
     scheme.eq_ignore_ascii_case("bearer")
         && bool::from(presented.as_bytes().ct_eq(token.as_bytes()))
+}
+
+fn path_authorized(path: &str, token: &str) -> bool {
+    path.strip_prefix(ENDPOINT)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(|presented| bool::from(presented.as_bytes().ct_eq(token.as_bytes())))
 }
 
 fn load_token(value: Option<&str>) -> Result<Arc<str>> {
@@ -148,6 +158,21 @@ mod tests {
         }
         assert!(!authorized(&headers(&[]), TOKEN));
         assert!(!authorized(&headers(&[&valid, &valid]), TOKEN));
+    }
+
+    #[test]
+    fn token_in_the_path_must_match_exactly() {
+        assert!(path_authorized(&format!("/mcp/{TOKEN}"), TOKEN));
+        for path in [
+            "/mcp".to_owned(),
+            "/mcp/".to_owned(),
+            format!("/mcp/{}", &TOKEN[..31]),
+            format!("/mcp/{TOKEN}x"),
+            format!("/mcp/{TOKEN}/"),
+            format!("/other/{TOKEN}"),
+        ] {
+            assert!(!path_authorized(&path, TOKEN), "{path}");
+        }
     }
 
     #[test]
