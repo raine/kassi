@@ -16,9 +16,9 @@ use serde_json::Value;
 use crate::api::Api;
 use tools::{
     AddItemsArgs, AddProductsArgs, CreateListArgs, DeleteListArgs, DuplicateListArgs,
-    GetProductArgs, JoinListArgs, ListArgs, RecommendationsArgs, RemoveItemsArgs,
-    SearchProductsArgs, SearchStoresArgs, SetItemProductArgs, StoreArgs, UpdateItemsArgs,
-    UpdateListArgs,
+    GetProductArgs, JoinListArgs, ListArgs, PurchaseHistoryArgs, RecommendationsArgs,
+    RemoveItemsArgs, SearchProductsArgs, SearchStoresArgs, SetItemProductArgs, StoreArgs,
+    UpdateItemsArgs, UpdateListArgs,
 };
 pub use tools::{GetListArgs, Tools};
 
@@ -296,7 +296,7 @@ impl Server {
     }
 
     #[tool(
-        description = "Suggest products to add to a shopping list, grouped by theme, based on what is on it and the user's history.",
+        description = "Suggest products to add to a shopping list, grouped by category, based on the user's purchase history. The list needs a store.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_recommendations(
@@ -307,12 +307,12 @@ impl Server {
     }
 
     #[tool(
-        description = "Products the user has bought before at a store, with how often and how many. Useful for restocking usual items.",
+        description = "The user's past purchases (from their S-Etukortti card) grouped by category, as products available at a store with current prices. Use it to restock usual items or plan a list. Lists products, not dates or counts.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn purchase_history(
         &self,
-        Parameters(args): Parameters<StoreArgs>,
+        Parameters(args): Parameters<PurchaseHistoryArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         tool_result(self.tools.purchase_history(args).await)
     }

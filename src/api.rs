@@ -595,43 +595,34 @@ impl Api {
         .context("not found")
     }
 
-    /// Product suggestions for a list, grouped the way the app shows them.
-    pub async fn recommendations(&self, list_id: &str, count: u32) -> Result<Value> {
+    /// Product suggestions for a list, grouped by category, with
+    /// `historySource`: `BOA` when they come from the user's card purchases,
+    /// `S_OSTOSLISTA` when from items collected in the app. On an empty list
+    /// with a store they amount to the user's purchase history. Lists
+    /// without a store get none.
+    pub async fn recommendations(
+        &self,
+        list_id: &str,
+        per_group: u32,
+        total: u32,
+    ) -> Result<Value> {
         let list: Value = self
             .field(
                 &format!(
-                    "query ($id: ID!, $count: Int) {{
+                    "query ($id: ID!, $perGroup: Int, $total: Int) {{
   shoppingList(id: $id) {{
-    recommendations(numOfRecommendations: $count, maxGroupSize: $count) {{
+    recommendations(maxGroupSize: $perGroup, numOfRecommendations: $total) {{
+      historySource
       groups {{ groupName products {{ ...ProductFields }} }}
     }}
   }}
 }}{PRODUCT_FIELDS}"
                 ),
-                json!({ "id": list_id, "count": count }),
+                json!({ "id": list_id, "perGroup": per_group, "total": total }),
                 "shoppingList",
             )
             .await?;
         Ok(list["recommendations"].clone())
-    }
-
-    /// Products the user has bought before at a store.
-    pub async fn past_products(&self, store_id: &str) -> Result<Vec<Value>> {
-        let products: Option<Vec<Value>> = self
-            .optional_field(
-                &format!(
-                    "query ($storeId: String!) {{
-  pastProducts(storeId: $storeId) {{
-    totalCount latestQuantity isWeeklyProduct product {{ ...ProductFields }}
-  }}
-}}{PRODUCT_FIELDS}"
-                ),
-                json!({ "storeId": store_id }),
-                "pastProducts",
-                Access::User,
-            )
-            .await?;
-        Ok(products.unwrap_or_default())
     }
 
     pub async fn search_stores(&self, query: &str, brands: &[String], limit: u32) -> Result<Value> {

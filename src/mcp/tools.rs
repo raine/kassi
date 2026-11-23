@@ -185,6 +185,16 @@ pub struct RecommendationsArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct PurchaseHistoryArgs {
+    /// Store id from search_stores or a list. Products and prices are those
+    /// of this store.
+    pub store_id: String,
+    /// Most products per category, 1-50. Defaults to 20.
+    pub per_category: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StoreArgs {
     /// Store id from search_stores or a list.
     pub store_id: String,
@@ -203,6 +213,12 @@ pub struct SearchStoresArgs {
     /// Stores to return, 1-50. Defaults to 10.
     pub limit: Option<u32>,
 }
+
+/// The API's upper limit for `numOfRecommendations`.
+const MAX_RECOMMENDATIONS: u32 = 500;
+
+/// Name of the empty list purchase_history creates and deletes again.
+const TEMPORARY_LIST_NAME: &str = "kassi: ostohistoria (väliaikainen)";
 
 const BRANDS: &[&str] = &[
     "ABC",
@@ -443,43 +459,62 @@ impl Tools {
 
     pub async fn get_recommendations(&self, args: RecommendationsArgs) -> Result<Value> {
         let list = self.resolve(args.list.as_deref()).await?;
+        if list.store_id.is_none() {
+            bail!("the list has no store; set one with update_shopping_list to get suggestions");
+        }
         let limit = args.limit.unwrap_or(8).clamp(1, 20);
-        let recommendations = self.api.recommendations(&list.id, limit).await?;
-        let groups: Vec<_> = recommendations["groups"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|group| {
-                json!({
-                    "group": group["groupName"],
-                    "products": group["products"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .map(product_view)
-                        .collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-        Ok(json!({ "list": list_summary(&list), "groups": groups }))
+        let recommendations = self
+            .api
+            .recommendations(&list.id, limit, limit * 20)
+            .await?;
+        Ok(json!({
+            "list": list_summary(&list),
+            "based_on": history_source(&recommendations),
+            "groups": groups_view(&recommendations, product_view),
+        }))
     }
 
-    pub async fn purchase_history(&self, args: StoreArgs) -> Result<Value> {
+    /// The API exposes card purchase history only as suggestions for a list,
+    /// so this reads them from an empty temporary list for the store.
+    pub async fn purchase_history(&self, args: PurchaseHistoryArgs) -> Result<Value> {
         let store_id = required("store_id", &args.store_id)?;
-        let past = self.api.past_products(store_id).await?;
-        let products: Vec<_> = past
-            .iter()
-            .map(|entry| {
-                let mut view = product_view(&entry["product"]);
-                view["times_bought"] = entry["totalCount"].clone();
-                view["last_quantity"] = entry["latestQuantity"].clone();
-                if entry["isWeeklyProduct"].as_bool() == Some(true) {
-                    view["bought_weekly"] = json!(true);
-                }
-                view
-            })
-            .collect();
-        Ok(json!({ "store_id": store_id, "products": products }))
+        let per_category = args.per_category.unwrap_or(20).clamp(1, 50);
+        self.delete_leftover_temporary_lists().await?;
+        let list = self
+            .api
+            .create_list(TEMPORARY_LIST_NAME, Some(store_id), &[])
+            .await?;
+        let history = self
+            .api
+            .recommendations(&list.id, per_category, MAX_RECOMMENDATIONS)
+            .await;
+        let deleted = self.api.delete_list(&list.id).await;
+        let history = history?;
+        if let Err(error) = deleted {
+            tracing::warn!("could not delete temporary list {}: {error:#}", list.id);
+        }
+        let source = history_source(&history);
+        let mut result = json!({
+            "store_id": store_id,
+            "based_on": source,
+            "categories": groups_view(&history, history_product_view),
+        });
+        if source != "card_purchases" {
+            result["note"] = json!(
+                "No S-Etukortti purchase data is available, so these come from items checked off in the app."
+            );
+        }
+        Ok(result)
+    }
+
+    /// Removes temporary lists that a crashed purchase_history call left.
+    async fn delete_leftover_temporary_lists(&self) -> Result<()> {
+        for list in self.api.shopping_lists().await? {
+            if list.name == TEMPORARY_LIST_NAME && list.items.is_empty() {
+                self.api.delete_list(&list.id).await?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn search_stores(&self, args: SearchStoresArgs) -> Result<Value> {
@@ -654,6 +689,52 @@ fn item_view(item: &Item) -> Value {
         "aisle": location.and_then(|l| l.aisle.clone()),
         "section": location.and_then(|l| l.label.clone()),
     }))
+}
+
+fn history_source(recommendations: &Value) -> &'static str {
+    match recommendations["historySource"].as_str() {
+        Some("BOA") => "card_purchases",
+        Some("S_OSTOSLISTA") => "app_checked_items",
+        _ => "unknown",
+    }
+}
+
+fn groups_view(recommendations: &Value, view: fn(&Value) -> Value) -> Vec<Value> {
+    recommendations["groups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|group| {
+            json!({
+                "category": group["groupName"],
+                "products": group["products"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(view)
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
+/// A slimmer product row for long history listings.
+fn history_product_view(product: &Value) -> Value {
+    let full = product_view(product);
+    let mut view = Map::new();
+    for key in [
+        "id",
+        "name",
+        "price_eur",
+        "regular_price_eur",
+        "campaign_until",
+        "available",
+    ] {
+        if let Some(value) = full.get(key) {
+            view.insert(key.to_owned(), value.clone());
+        }
+    }
+    Value::Object(view)
 }
 
 /// A compact product row: identity, price, and where to find it.
@@ -913,6 +994,34 @@ mod tests {
         assert!(view.get("regular_price_eur").is_none());
         assert!(view.get("lowest_30_day_price_eur").is_none());
         assert_eq!(view["available"], false);
+    }
+
+    #[test]
+    fn history_lists_slim_products_by_category() {
+        let history = json!({
+            "historySource": "BOA",
+            "groups": [{
+                "groupName": "Juustot",
+                "products": [{
+                    "id": "100008668",
+                    "name": "Kotimaista raejuusto",
+                    "pricing": { "currentPrice": 1.19 },
+                    "location": { "aisle": "12", "label": "Juustot" }
+                }]
+            }]
+        });
+        assert_eq!(history_source(&history), "card_purchases");
+        assert_eq!(
+            groups_view(&history, history_product_view),
+            vec![json!({
+                "category": "Juustot",
+                "products": [{ "id": "100008668", "name": "Kotimaista raejuusto", "price_eur": 1.19 }]
+            })]
+        );
+        assert_eq!(
+            history_source(&json!({ "historySource": "S_OSTOSLISTA" })),
+            "app_checked_items"
+        );
     }
 
     #[test]

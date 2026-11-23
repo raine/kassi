@@ -23,6 +23,11 @@ Lists hold two kinds of items: free text ("maito") and products linked to an
 item in the store's assortment, which carry a price and aisle. Product search
 with a `store_id` returns that store's prices, campaigns, and aisles.
 
+`purchase_history` lists what you have bought with your S-Etukortti, by
+category, as products at a chosen store with current prices. The API only
+offers this as suggestions for a list, so the tool briefly creates an empty
+list with that store and deletes it again.
+
 ## Install
 
 Build and install locally:
