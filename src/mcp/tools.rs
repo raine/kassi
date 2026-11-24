@@ -161,6 +161,8 @@ pub struct SearchProductsArgs {
     /// Store id for that store's prices, availability, and aisles. Omit to
     /// search the whole S-ryhmä assortment.
     pub store_id: Option<String>,
+    /// List id or name to search in that list's store, instead of store_id.
+    pub list: Option<String>,
     /// Results to return, 1-50. Defaults to 10.
     pub limit: Option<u32>,
     /// Results to skip, for paging. Defaults to 0.
@@ -498,7 +500,18 @@ impl Tools {
         let query = required("query", &args.query)?;
         let limit = args.limit.unwrap_or(10).clamp(1, 50);
         let offset = args.offset.unwrap_or(0);
-        let store_id = optional(args.store_id.as_deref());
+        let list_store = match (optional(args.store_id.as_deref()), args.list.as_deref()) {
+            (None, Some(list)) => {
+                let list = self.resolve(Some(list)).await?;
+                Some(list.store_id.context(
+                    "the list has no store; set one with update_shopping_list or pass store_id",
+                )?)
+            }
+            _ => None,
+        };
+        let store_id = list_store
+            .as_deref()
+            .or_else(|| optional(args.store_id.as_deref()));
         let history = match store_id {
             Some(store_id) => match self.store_history(store_id).await {
                 Ok(history) => Some(history),

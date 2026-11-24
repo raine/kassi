@@ -38,8 +38,8 @@ only one list.
 invent ids.
 - Items are either free text (add_items) or store products (add_products) with \
 a price and a location: an aisle number or a department, plus the shelf. When \
-the list has a store, add products: search_products with the list's store_id \
-and prefer a result marked bought_before, unless the user asks for something \
+the list has a store, add products: search_products with the list (no need to \
+fetch it first for its store) and prefer a result marked bought_before, unless the user asks for something \
 else. If several fit and nothing the user said settles it (for example two \
 coffee milks they buy, or no bought_before result and the size or kind \
 matters), ask which one, listing the few candidates with prices, instead of \
@@ -332,7 +332,7 @@ impl Server {
     // Products
 
     #[tool(
-        description = "Search products by name. With store_id: that store's prices, campaigns, availability, and location in the store, with products the user has bought before (from their S-Etukortti history) first and marked bought_before. Without: the whole S-ryhmä assortment.",
+        description = "Search products by name. With store_id, or a list to use its store: that store's prices, campaigns, availability, and location in the store, with products the user has bought before (from their S-Etukortti history) first and marked bought_before. Without: the whole S-ryhmä assortment.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_products(
