@@ -12,18 +12,17 @@ https://github.com/user-attachments/assets/fa19e33d-4c75-4ab8-9b46-98e2ea7a447f
 
 ## What the assistant can do
 
-- **Lists:** view, create, rename, copy, and delete lists, set a list's store,
-  share a list by link, and join a list someone shared.
-- **Items:** add, rename, check off, and remove items, set quantities, and
-  clear the checked-off ones.
-- **Products:** search a store's products with prices, campaigns, and shelf
-  locations, and look up a product's ingredients, allergens, and nutrition.
-- **Purchase history:** see what you have bought with your S-Etukortti and get
-  suggestions for a list. Products you have bought before come first in
-  searches.
-- **Stores:** find stores and their address, opening hours, and services.
-- **Route map:** order a list's products into a walk from the entrance to the
-  checkout, drawn on the store's floor plan.
+- View, create, rename, copy, and delete lists, set a list's store, share a
+  list by link, and join a list someone shared.
+- Add, rename, check off, and remove items, set quantities, and clear the
+  checked-off ones.
+- Search a store's products with prices, campaigns, and shelf locations, and
+  look up a product's ingredients, allergens, and nutrition.
+- See what you have bought with your S-Etukortti and get suggestions for a
+  list. Products you have bought before come first in searches.
+- Find stores and their address, opening hours, and services.
+- Order a list's products into a walk from the entrance to the checkout, drawn
+  on the store's floor plan.
 
 Try asking:
 
@@ -34,8 +33,8 @@ Try asking:
 
 Good to know:
 
-- An item is either plain text ("maito") or a product from the store, which
-  has a price and a place in the store. Each list has its own store, which the
+- An item is either a note ("maito"), as in the app, or a product from the
+  store, which has a price and a place in the store. Each list has its own store, which the
   assistant uses for prices and products. Only products appear on the route
   map.
 - ChatGPT shows the route map in the chat. Other clients get the walking order
