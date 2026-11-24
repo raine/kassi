@@ -38,7 +38,8 @@ for the temporary list.
 entrance to the checkout and draws it on the store's floor plan, from the same
 indoor maps the app shows. In ChatGPT the map appears in the chat as an app
 view; other clients get the stop order as text. Free-text items have no place
-in the store and are listed separately.
+in the store and are listed separately. Given a `store_id` and no list, it
+shows the store's plain floor plan.
 
 ## Install
 

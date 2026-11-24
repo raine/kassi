@@ -23,8 +23,8 @@ use crate::api::Api;
 use tools::{
     AddItemsArgs, AddProductsArgs, CreateListArgs, DeleteListArgs, DuplicateListArgs,
     GetProductArgs, JoinListArgs, ListArgs, PurchaseHistoryArgs, RecommendationsArgs,
-    RemoveItemsArgs, SearchProductsArgs, SearchStoresArgs, SetItemProductArgs, StoreArgs,
-    UpdateItemsArgs, UpdateListArgs,
+    RemoveItemsArgs, RouteMapArgs, SearchProductsArgs, SearchStoresArgs, SetItemProductArgs,
+    StoreArgs, UpdateItemsArgs, UpdateListArgs,
 };
 pub use tools::{GetListArgs, Tools};
 
@@ -94,13 +94,13 @@ impl Server {
     // Routes
 
     #[tool(
-        description = "Show the user a map of the store with the walking route for a shopping list: the list's uncollected products in walking order from the entrance to the checkout, numbered on the store's floor plan, in the chat. Use it when the user is going to or is in the store and asks for the order, a route, or a map. Free-text notes cannot be placed. The list needs a store.",
+        description = "Show the store's floor plan (map) in the chat. With a list, it also draws the walking route: the list's uncollected products numbered in walking order from the entrance to the checkout. Use it whenever the user asks for a store map, a route, or the order to collect things. Pass store_id without a list for the plain map of any store. The map is displayed to the user even when the route has no stops; free-text notes cannot be placed on it.",
         annotations(read_only_hint = true, open_world_hint = false),
         meta = route_map_tool_meta()
     )]
     async fn show_route_map(
         &self,
-        Parameters(args): Parameters<ListArgs>,
+        Parameters(args): Parameters<RouteMapArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         Ok(match self.tools.route_map(args).await {
             Ok(route) => {

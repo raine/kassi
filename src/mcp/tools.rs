@@ -199,6 +199,16 @@ pub struct PurchaseHistoryArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct RouteMapArgs {
+    /// List id or name whose route to draw. May be omitted when the user has
+    /// only one list or when store_id is given.
+    pub list: Option<String>,
+    /// Store id from search_stores, to show a store's map without a list.
+    pub store_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StoreArgs {
     /// Store id from search_stores or a list.
     pub store_id: String,
@@ -632,10 +642,21 @@ impl Tools {
 
     /// Orders the list's uncollected items into a walk from the entrance to
     /// the checkout of the list's store, and draws it on the store map.
-    pub async fn route_map(&self, args: ListArgs) -> Result<RouteMap> {
+    /// Without a list, draws the store's plain floor plan.
+    pub async fn route_map(&self, args: RouteMapArgs) -> Result<RouteMap> {
+        if let (Some(store_id), None) = (args.store_id.as_deref(), args.list.as_deref()) {
+            let map = self.store_map(store_id).await?;
+            return Ok(RouteMap {
+                summary: json!({
+                    "store_id": store_id,
+                    "shown_to_user": "The store's floor plan is displayed in the chat.",
+                }),
+                svg: map.svg(&map.route(&[])),
+            });
+        }
         let list = self.resolve(args.list.as_deref()).await?;
-        let Some(store_id) = list.store_id.as_deref() else {
-            bail!("the list has no store; set one with update_shopping_list to plan a route");
+        let Some(store_id) = list.store_id.as_deref().or(args.store_id.as_deref()) else {
+            bail!("the list has no store; set one with update_shopping_list or pass store_id");
         };
         let map = self.store_map(store_id).await?;
         let open: Vec<&Item> = list.items.iter().filter(|item| !item.collected).collect();
@@ -674,9 +695,16 @@ impl Tools {
             .collect();
         let mut summary = json!({
             "list": list_summary(&list),
+            "shown_to_user": if stops.is_empty() {
+                "The store's floor plan is displayed in the chat; no products on the list could be placed on it."
+            } else {
+                "The store's floor plan with this route is displayed in the chat."
+            },
             "stops": stops,
-            "total_walk_metres": route.total_metres.round(),
         });
+        if !route.stops.is_empty() {
+            summary["total_walk_metres"] = json!(route.total_metres.round());
+        }
         if !route.unplaced.is_empty() {
             summary["not_on_map"] = json!(route.unplaced);
             summary["note"] = json!(

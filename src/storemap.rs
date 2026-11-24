@@ -239,16 +239,18 @@ impl StoreMap {
 
         let start = self.entrance.unwrap_or(Point { x: 0.0, y: 0.0 });
         let end = self.checkout.unwrap_or(start);
-        let mut line = format!("M{:.1} {:.1}", start.x, start.y);
-        for stop in &route.stops {
-            // Walk along the aisle grid: first across, then along.
-            let _ = write!(line, " H{:.1} V{:.1}", stop.point.x, stop.point.y);
+        if !route.stops.is_empty() {
+            let mut line = format!("M{:.1} {:.1}", start.x, start.y);
+            for stop in &route.stops {
+                // Walk along the aisle grid: first across, then along.
+                let _ = write!(line, " H{:.1} V{:.1}", stop.point.x, stop.point.y);
+            }
+            let _ = write!(line, " H{:.1} V{:.1}", end.x, end.y);
+            let _ = write!(
+                svg,
+                r##"<path d="{line}" fill="none" stroke="#00a651" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>"##
+            );
         }
-        let _ = write!(line, " H{:.1} V{:.1}", end.x, end.y);
-        let _ = write!(
-            svg,
-            r##"<path d="{line}" fill="none" stroke="#00a651" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>"##
-        );
         let mut marker = |p: Point, label: &str, colour: &str| {
             let _ = write!(
                 svg,
