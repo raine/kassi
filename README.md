@@ -1,60 +1,54 @@
 # kassi
 
-An [MCP](https://modelcontextprotocol.io) server for
-[S-ostoslista](https://play.google.com/store/apps/details?id=fi.sok.s_ostoslista),
-the S-ryhmä shopping list app. It lets an assistant such as Claude or ChatGPT
-read and edit your shopping lists, search products in your store, and look up
-stores. It is a single static binary that runs comfortably on a Raspberry Pi.
+An [MCP](https://modelcontextprotocol.io) server that lets Claude, ChatGPT,
+and other assistants use your
+[S-ostoslista](https://play.google.com/store/apps/details?id=fi.sok.s_ostoslista)
+shopping lists.
 
-kassi uses the app's own backend with your S-ryhmä account. It is not
-affiliated with S-ryhmä, and the API it relies on is undocumented and may
-change.
+kassi uses your S-ryhmä account. It is unofficial and depends on an
+undocumented API that may change.
 
-## Tools
+## What the assistant can do
 
-| Area     | Tools                                                                                                                                                                       |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lists    | `list_shopping_lists`, `get_shopping_list`, `create_shopping_list`, `update_shopping_list`, `duplicate_shopping_list`, `delete_shopping_list`, `share_shopping_list`, `join_shared_list` |
-| Items    | `add_items`, `add_products`, `update_items`, `set_item_product`, `remove_items`, `clear_collected`                                                                           |
-| Products | `search_products`, `get_product`, `get_recommendations`, `purchase_history`                                                                                                 |
-| Stores   | `search_stores`, `get_store`                                                                                                                                                |
-| Routes   | `show_route_map`                                                                                                                                                            |
+- **Lists:** view, create, rename, copy, and delete lists, set a list's store,
+  share a list by link, and join a list someone shared.
+- **Items:** add, rename, check off, and remove items, set quantities, and
+  clear the checked-off ones.
+- **Products:** search a store's products with prices, campaigns, and shelf
+  locations, and look up a product's ingredients, allergens, and nutrition.
+- **Purchase history:** see what you have bought with your S-Etukortti and get
+  suggestions for a list. Products you have bought before come first in
+  searches.
+- **Stores:** find stores and their address, opening hours, and services.
+- **Route map:** order a list's products into a walk from the entrance to the
+  checkout, drawn on the store's floor plan.
 
-Lists hold two kinds of items: free text ("maito") and products linked to an
-item in the store's assortment, which carry a price and their place in the
-store. Product search with a `store_id` returns that store's prices, campaigns,
-and locations: an aisle number or a department such as MAITO-OSASTO, and the
-shelf name.
+Try asking:
 
-`purchase_history` lists what you have bought with your S-Etukortti, by
-category, as products at a chosen store with current prices. The API only
-offers this as suggestions for a list, so kassi briefly creates an empty list
-with that store and deletes it again. Product search in a store uses the same
-history: products you have bought come first and are marked `bought_before`.
-kassi keeps a store's history for an hour, so only the first search there pays
-for the temporary list.
+- "Add milk and rye bread to my Ruoka list."
+- "What do I usually buy that's missing from my list?"
+- "What time does my store close today?"
+- "Show me the route through the store for my list."
 
-`show_route_map` orders a list's uncollected products into a walk from the
-entrance to the checkout and draws it on the store's floor plan, from the same
-indoor maps the app shows. In ChatGPT the map appears in the chat as an app
-view; other clients get the stop order as text. Free-text items have no place
-in the store and are listed separately. Given a `store_id` and no list, it
-shows the store's plain floor plan.
+Good to know:
+
+- An item is either plain text ("maito") or a product from the store, which
+  has a price and a place in the store. Set a store on your list to get
+  products; only products appear on the route map.
+- ChatGPT shows the route map in the chat. Other clients get the walking order
+  as text.
+- Reading your purchase history briefly creates an empty list and deletes it
+  again, so you may see one flash by in the app.
 
 ## Install
 
-Build and install locally:
+With Rust 1.96 or newer, run in this repository:
 
 ```sh
-just install            # cargo install --locked --path .
+cargo install --locked --path .
 ```
 
-Or build a static binary for a 64-bit Raspberry Pi OS and copy it over SSH
-(needs [zig](https://ziglang.org) and `cargo-zigbuild` 0.24 or newer):
-
-```sh
-just deploy-pi pi@raspberrypi.local   # installs ~/.local/bin/kassi on the Pi
-```
+To run kassi on a Raspberry Pi instead, see [Raspberry Pi](#raspberry-pi).
 
 ## Log in
 
@@ -62,122 +56,127 @@ just deploy-pi pi@raspberrypi.local   # installs ~/.local/bin/kassi on the Pi
 kassi login
 ```
 
-The S-ryhmä login needs a browser, and a captcha keeps it from being
-automated, so `kassi login` walks you through it:
+The S-ryhmä login has a captcha, so you log in with a browser and give the
+result to kassi:
 
-1. In a desktop browser, open DevTools on the Network tab and enable
-   "Preserve log".
-2. Open `https://kirjautuminen.s-ostoslista.fi/login` in that tab and log in.
+1. In a desktop browser, open a new tab, open DevTools on the Network tab, and
+   enable **Preserve log**.
+2. Go to `https://kirjautuminen.s-ostoslista.fi/login` in that tab and log in.
 3. The login ends on a blank page. In the Network tab, find the
    `callback?nonce=…` request and copy its URL.
 4. Paste the URL into `kassi login` within a few minutes.
 
-You can run `kassi login` on the Pi over SSH and do the browser part on any
-computer.
-
-The session is saved to `$XDG_STATE_HOME/kassi/tokens.json` (by default
-`~/.local/state/kassi/tokens.json`, readable only by you); set
-`KASSI_STATE_DIR` or `--state-dir` to keep it elsewhere. kassi refreshes the
-session on its own. The refresh token is single-use and each refresh replaces
-it, so do not copy `tokens.json` to a second machine and use both: the first
-refresh logs the other one out. Logging out in the app also ends the session.
-Run `kassi login` again when that happens.
-
 Check that it works:
 
 ```sh
-kassi lists
-kassi show "Ruoka"
+kassi lists          # all your lists
+kassi show "Ruoka"   # one list and its items
 ```
 
-## Connect an assistant
+kassi keeps the session alive on its own. Run `kassi login` again if you log
+out in the app or the session stops working.
 
-### Claude Code, Claude Desktop, and other local clients (stdio)
+## Connect your assistant
 
-Run kassi as a subprocess, either locally or on the Pi over SSH:
+### Claude Code, Claude Desktop, and other local clients
+
+The client runs `kassi mcp` itself:
 
 ```sh
 claude mcp add kassi -- kassi mcp
-claude mcp add kassi -- ssh pi@raspberrypi.local .local/bin/kassi mcp
 ```
 
-For Claude Desktop, add to `claude_desktop_config.json`:
+For Claude Desktop, add this to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "kassi": { "command": "ssh", "args": ["pi@raspberrypi.local", ".local/bin/kassi", "mcp"] }
+    "kassi": { "command": "/absolute/path/to/kassi", "args": ["mcp"] }
   }
 }
 ```
 
-### ChatGPT through an OpenAI tunnel
+### ChatGPT
 
-ChatGPT cannot start a local process, but OpenAI's
-[`tunnel-client`](https://github.com/openai/tunnel-client) can run `kassi mcp`
-on your machine and connect it to ChatGPT over an outbound connection, with no
-public port or HTTPS setup.
+ChatGPT cannot start a local program. OpenAI's
+[`tunnel-client`](https://github.com/openai/tunnel-client) runs kassi on your
+machine and connects it to ChatGPT, with no public port or HTTPS setup.
 
 1. On the [OpenAI Platform](https://platform.openai.com/settings/organization/tunnels),
    create a tunnel for your ChatGPT workspace and copy its `tunnel_…` ID.
 2. Create an API key restricted to **Tunnels: Read and Use**, and save it in a
    file readable only by you.
-3. Point `tunnel-client` at kassi:
+3. Save a config file for `tunnel-client`:
 
    ```yaml
    config_version: 1
    control_plane:
      base_url: "https://api.openai.com"
      tunnel_id: "tunnel_…"
-     api_key: "file:/home/you/.config/kassi-mcp/openai-tunnel-key"
+     api_key: "file:/absolute/path/to/openai-tunnel-key"
    mcp:
      commands:
        - channel: main
-         command: "/home/you/.local/bin/kassi mcp"
+         command: "/absolute/path/to/kassi mcp"
    ```
 
-   and run `tunnel-client run --config <that file>`, for example as a systemd
-   service.
-4. In ChatGPT, open **Plugins → Add → Add custom MCP server**, choose
+4. Run `tunnel-client run --config <that file>` and keep it running, for
+   example as a systemd service.
+5. In ChatGPT, open **Plugins → Add → Add custom MCP server**, choose
    **Tunnel**, pick the tunnel, and set authentication to **No
    authentication**.
 
-ChatGPT keeps the tool list it loaded when you added the server. After
-updating kassi to a version whose tools, tool descriptions, or instructions
-changed, open **Settings → Plugins**, choose the server, press **Refresh
-tools**, and start a new chat; until then ChatGPT works from the old
-descriptions.
+Anyone who can use the plugin in your ChatGPT workspace can read and change
+your lists.
 
-kassi logs each tool call with its arguments to stderr, which tunnel-client
-passes on (to the journal when it runs under systemd). That shows which tools
-ChatGPT actually called.
+After updating kassi, open **Settings → Plugins** in ChatGPT, choose the
+server, press **Refresh tools**, and start a new chat. Until then ChatGPT uses
+the old tool descriptions.
 
-ChatGPT asks for approval before tools that delete things, such as
-`remove_items` and `delete_shopping_list`. Anyone who can use the plugin in
-your ChatGPT workspace can read and change your lists.
+### Over HTTP
 
-### Over the network (Streamable HTTP)
+For clients that connect to a URL:
 
 ```sh
 export KASSI_MCP_TOKEN=$(openssl rand -hex 32)
-kassi mcp --http --bind 127.0.0.1:8737
+kassi mcp --http                # listens on 127.0.0.1:8737; change with --bind
 ```
 
 The endpoint is `http://<host>:8737/mcp`. Every request needs the token,
-either as `Authorization: Bearer <token>` or in the URL as
-`/mcp/<token>` for clients that cannot send headers. kassi serves plain HTTP,
-so keep it on localhost or a private network (for example Tailscale) and put
-HTTPS in front of it before exposing it.
+either as an `Authorization: Bearer <token>` header or in the URL as
+`/mcp/<token>` for clients that cannot send headers.
 
-To reach it from outside your network, put HTTPS in front of it, for example
-with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) (`tailscale funnel
---bg 8737`), and use `https://<host>/mcp/<token>` as the server URL. The token in
-the URL is the only thing protecting your account, so treat the URL like a
-password.
+kassi serves plain HTTP, so keep it on localhost or a private network such as
+Tailscale. To reach it from the internet, put HTTPS in front of it, for
+example with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+(`tailscale funnel --bg 8737`), and use `https://<host>/mcp/<token>` as the
+server URL. That URL is then the only thing protecting your account, so treat
+it like a password.
 
-### Running as a service on the Pi
+## Raspberry Pi
 
-`~/.config/systemd/user/kassi.service`:
+kassi runs well on a Pi with a 64-bit OS. Build it on your computer and copy
+it over SSH. This needs [just](https://github.com/casey/just),
+[zig](https://ziglang.org), and `cargo-zigbuild` 0.24 or newer.
+
+```sh
+just deploy-pi pi@raspberrypi.local   # installs ~/.local/bin/kassi on the Pi
+```
+
+Log in over SSH and do the browser steps on your computer:
+
+```sh
+ssh -t pi@raspberrypi.local .local/bin/kassi login
+```
+
+Local clients can run kassi on the Pi through SSH:
+
+```sh
+claude mcp add kassi -- ssh pi@raspberrypi.local .local/bin/kassi mcp
+```
+
+To serve it over HTTP, create `~/.config/systemd/user/kassi.service` on the
+Pi:
 
 ```ini
 [Unit]
@@ -185,7 +184,7 @@ Description=kassi MCP server
 After=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/kassi mcp --http --bind 127.0.0.1:8737
+ExecStart=%h/.local/bin/kassi mcp --http
 EnvironmentFile=%h/.config/kassi/env
 Restart=on-failure
 
@@ -201,16 +200,26 @@ systemctl --user enable --now kassi
 loginctl enable-linger "$USER"   # keep it running while logged out
 ```
 
-Logs go to stderr (`journalctl --user -u kassi`); set `KASSI_LOG=kassi=debug`
-for more detail.
+## Session file
+
+The login is saved in `~/.local/state/kassi/tokens.json` (under
+`$XDG_STATE_HOME` if set). Set `KASSI_STATE_DIR` or pass `--state-dir` to keep
+it elsewhere. Do not copy this file to a second machine and use both: they log
+each other out.
+
+## Troubleshooting
+
+kassi logs every tool call and its arguments to stderr, which shows what the
+assistant actually did. The log can contain your list contents. Under
+systemd, read it with `journalctl --user -u kassi`. Set
+`KASSI_LOG=kassi=debug` for more detail.
 
 ## Development
 
 ```sh
-just            # list recipes
-just check      # format, unused dependencies, clippy
-just test       # unit tests
-just build-pi   # static aarch64 binary
+just                         # list recipes
+just install-quality-tools   # tools the checks need
+just install-hooks           # enable the commit hooks
+just check                   # formatting, unused dependencies, clippy
+just test                    # unit tests
 ```
-
-Run `just install-hooks` once to enable the commit hooks.
