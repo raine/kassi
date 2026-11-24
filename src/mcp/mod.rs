@@ -184,7 +184,7 @@ impl Server {
     // Items
 
     #[tool(
-        description = "Add free-text items to a shopping list. Returns the added items and their ids.",
+        description = "Add free-text notes to a shopping list: names only, with no product, price, or place in the store. If the list has a store, add products instead (search_products, then add_products) unless the user asks for a note or nothing fits. Returns the added items and their ids.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -361,6 +361,20 @@ impl Server {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Server {
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        tracing::info!(
+            tool = %request.name,
+            arguments = %serde_json::Value::from(request.arguments.clone().unwrap_or_default()),
+            "tool call"
+        );
+        let call = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(call).await
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("kassi", env!("CARGO_PKG_VERSION")))
