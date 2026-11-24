@@ -277,22 +277,6 @@ impl StoreMap {
     }
 }
 
-/// Renders an SVG drawing to PNG, at its own pixel size.
-pub fn png(svg: &str) -> Result<Vec<u8>> {
-    let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
-    let tree = resvg::usvg::Tree::from_str(svg, &options).context("drawing the map")?;
-    let size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
-        .context("the map drawing has no size")?;
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::default(),
-        &mut pixmap.as_mut(),
-    );
-    pixmap.encode_png().context("encoding the map as PNG")
-}
-
 /// The map's north-west corner, from which positions are measured.
 struct Origin {
     lon: f64,
@@ -504,7 +488,7 @@ mod tests {
         assert_eq!(route.stops[0].names, ["maito", "rahka"]);
     }
 
-    /// Draws a real store map to `$KASSI_MAP_DIR/route.{svg,png}` from the
+    /// Draws a real store map to `$KASSI_MAP_DIR/route.svg` from the
     /// layers saved there as `departments.json`, `sections.json`, and
     /// `pois.json`.
     #[test]
@@ -538,7 +522,6 @@ mod tests {
         );
         let svg = map.svg(&route);
         std::fs::write(dir.join("route.svg"), &svg).unwrap();
-        std::fs::write(dir.join("route.png"), png(&svg).unwrap()).unwrap();
     }
 
     #[test]

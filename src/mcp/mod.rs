@@ -7,7 +7,6 @@ mod tools;
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
-use base64::Engine as _;
 use rmcp::RoleServer;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -111,31 +110,6 @@ impl Server {
                 result.meta = Some(meta(json!({ "kassi/svg": route.svg })));
                 result
             }
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(format!("{error:#}"))]),
-        })
-    }
-
-    #[tool(
-        description = "The walking route for a shopping list as a PNG image of the store's floor plan, with the list's uncollected products numbered in walking order from the entrance to the checkout, plus the same order as text. The list needs a store.",
-        annotations(read_only_hint = true, open_world_hint = false)
-    )]
-    async fn route_map_image(
-        &self,
-        Parameters(args): Parameters<ListArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let image = async {
-            let route = self.tools.route_map(args).await?;
-            let png = route.png()?;
-            anyhow::Ok((route.summary, png))
-        };
-        Ok(match image.await {
-            Ok((summary, png)) => CallToolResult::success(vec![
-                ContentBlock::text(summary.to_string()),
-                ContentBlock::image(
-                    base64::engine::general_purpose::STANDARD.encode(png),
-                    "image/png",
-                ),
-            ]),
             Err(error) => CallToolResult::error(vec![ContentBlock::text(format!("{error:#}"))]),
         })
     }

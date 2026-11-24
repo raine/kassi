@@ -18,7 +18,7 @@ change.
 | Items    | `add_items`, `add_products`, `update_items`, `set_item_product`, `remove_items`, `clear_collected`                                                                           |
 | Products | `search_products`, `get_product`, `get_recommendations`, `purchase_history`                                                                                                 |
 | Stores   | `search_stores`, `get_store`                                                                                                                                                |
-| Routes   | `show_route_map`, `route_map_image`                                                                                                                                         |
+| Routes   | `show_route_map`                                                                                                                                                            |
 
 Lists hold two kinds of items: free text ("maito") and products linked to an
 item in the store's assortment, which carry a price and their place in the
@@ -37,10 +37,8 @@ for the temporary list.
 `show_route_map` orders a list's uncollected products into a walk from the
 entrance to the checkout and draws it on the store's floor plan, from the same
 indoor maps the app shows. In ChatGPT the map appears in the chat as an app
-view; other clients get the stop order as text. `route_map_image` returns the
-same drawing as a PNG, which a client can pass to the model but ChatGPT does not
-show to the user. Free-text items have no place in the store and are listed
-separately.
+view; other clients get the stop order as text. Free-text items have no place
+in the store and are listed separately.
 
 ## Install
 

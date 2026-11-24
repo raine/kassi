@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::api::{Api, Item, ItemChanges, ProductItem, SHARE_URL, ShoppingList};
-use crate::storemap::{self, StoreMap, Wanted};
+use crate::storemap::{StoreMap, Wanted};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -261,12 +261,6 @@ pub struct Tools {
 pub struct RouteMap {
     pub summary: Value,
     pub svg: String,
-}
-
-impl RouteMap {
-    pub fn png(&self) -> Result<Vec<u8>> {
-        storemap::png(&self.svg)
-    }
 }
 
 /// A store's purchase history as the API returns it, with the ids of its
