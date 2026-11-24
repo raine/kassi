@@ -4,6 +4,7 @@
 //! so the nonce never shows up in the address bar. The browser is started with
 //! a throwaway profile and watched over the DevTools protocol for that request.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -11,11 +12,16 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 /// How long the browser gets to start and open its DevTools port.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long the browser gets to quit after being told to.
+const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Chromium-based browsers, as macOS applications and as commands.
 const MAC_APPS: &[&str] = &[
@@ -62,8 +68,59 @@ pub async fn login_nonce(browser: &Path, login_url: &str, callback_url: &str) ->
         .prefix("kassi-login-")
         .tempdir()
         .context("creating a browser profile directory")?;
-    let mut child = Command::new(browser)
-        .arg(format!("--user-data-dir={}", profile.path().display()))
+    let mut child = launch(browser, profile.path())?;
+
+    let endpoint = tokio::time::timeout(
+        STARTUP_TIMEOUT,
+        devtools_endpoint(profile.path(), &mut child),
+    )
+    .await
+    .context("the browser did not open its DevTools port")??;
+    let (socket, _) = tokio_tungstenite::connect_async(&endpoint)
+        .await
+        .context("connecting to the browser")?;
+    let mut browser = Browser { socket, next_id: 0 };
+
+    let nonce = tokio::select! {
+        nonce = browser.watch(login_url, callback_url) => nonce,
+        _ = tokio::signal::ctrl_c() => Err(anyhow!("login cancelled")),
+    };
+
+    let _ = tokio::time::timeout(EXIT_TIMEOUT, browser.close()).await;
+    let _ = child.kill().await;
+    remove_profile(profile).await;
+    nonce
+}
+
+/// Removes the profile directory, which the browser's processes can still be
+/// writing to for a moment after the browser has quit.
+async fn remove_profile(profile: tempfile::TempDir) {
+    let path = profile.keep();
+    for _ in 0..20 {
+        if tokio::fs::remove_dir_all(&path).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// Starts the browser on an empty tab with `profile` as its profile directory.
+/// The returned process is the browser itself, or on macOS the `open` command
+/// that started it, which exits right away.
+fn launch(browser: &Path, profile: &Path) -> Result<Child> {
+    // A macOS application started through its executable opens behind the
+    // other windows; `open` brings it to the front. `-n` starts an instance
+    // separate from one already running.
+    let mut command = match app_bundle(browser) {
+        Some(app) => {
+            let mut command = Command::new("open");
+            command.args(["-n", "-a"]).arg(app).arg("--args");
+            command
+        }
+        None => Command::new(browser),
+    };
+    command
+        .arg(format!("--user-data-dir={}", profile.display()))
         .args([
             "--remote-debugging-port=0",
             "--no-first-run",
@@ -76,75 +133,85 @@ pub async fn login_nonce(browser: &Path, login_url: &str, callback_url: &str) ->
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("starting {}", browser.display()))?;
-
-    let nonce = tokio::select! {
-        nonce = watch(profile.path(), &mut child, login_url, callback_url) => nonce,
-        _ = tokio::signal::ctrl_c() => Err(anyhow!("login cancelled")),
-    };
-    // The profile directory can only be removed once the browser has exited.
-    let _ = child.kill().await;
-    nonce
+        .with_context(|| format!("starting {}", browser.display()))
 }
 
-async fn watch(
-    profile: &Path,
-    child: &mut Child,
-    login_url: &str,
-    callback_url: &str,
-) -> Result<String> {
-    let endpoint = tokio::time::timeout(STARTUP_TIMEOUT, devtools_endpoint(profile, child))
-        .await
-        .context("the browser did not open its DevTools port")??;
-    let (mut socket, _) = tokio_tungstenite::connect_async(&endpoint)
-        .await
-        .context("connecting to the browser")?;
+/// The `.app` bundle an executable at `<bundle>/Contents/MacOS/<name>` is in.
+fn app_bundle(executable: &Path) -> Option<&Path> {
+    let macos = executable.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.ends_with("Contents/MacOS") && bundle.extension()? == "app").then_some(bundle)
+}
 
-    let mut next_id = 0u64;
-    let mut command = |method: &str, params: Value, session: Option<&str>| {
-        next_id += 1;
-        let mut message = json!({ "id": next_id, "method": method, "params": params });
+/// The browser's DevTools connection.
+struct Browser {
+    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    next_id: u64,
+}
+
+impl Browser {
+    async fn send(&mut self, method: &str, params: Value, session: Option<&str>) -> Result<()> {
+        self.next_id += 1;
+        let mut message = json!({ "id": self.next_id, "method": method, "params": params });
         if let Some(session) = session {
             message["sessionId"] = session.into();
         }
-        Message::text(message.to_string())
-    };
-
-    // Attaches to the open tab and to any tab the login opens later.
-    let attach = json!({ "autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true });
-    socket
-        .send(command("Target.setAutoAttach", attach, None))
-        .await?;
-
-    let mut navigated = false;
-    while let Some(message) = socket.next().await {
-        let Message::Text(text) = message.context("reading from the browser")? else {
-            continue;
-        };
-        let event: Value = serde_json::from_str(&text).context("decoding a browser message")?;
-        let params = &event["params"];
-        match event["method"].as_str() {
-            Some("Target.attachedToTarget") if params["targetInfo"]["type"] == "page" => {
-                let session = params["sessionId"].as_str();
-                socket
-                    .send(command("Network.enable", json!({}), session))
-                    .await?;
-                if !navigated {
-                    navigated = true;
-                    let page = json!({ "url": login_url });
-                    socket.send(command("Page.navigate", page, session)).await?;
-                }
-            }
-            Some("Network.requestWillBeSent") => {
-                let url = params["request"]["url"].as_str().unwrap_or_default();
-                if let Some(nonce) = callback_nonce(url, callback_url) {
-                    return Ok(nonce);
-                }
-            }
-            _ => {}
-        }
+        self.socket.send(Message::text(message.to_string())).await?;
+        Ok(())
     }
-    bail!("the browser was closed before the login finished")
+
+    /// Quits the browser and waits for it to go away.
+    async fn close(&mut self) {
+        let _ = self.send("Browser.close", json!({}), None).await;
+        while let Some(Ok(_)) = self.socket.next().await {}
+    }
+
+    /// Opens `login_url` in the browser's tab and waits for a request to
+    /// `callback_url` that carries a nonce.
+    async fn watch(&mut self, login_url: &str, callback_url: &str) -> Result<String> {
+        // Attaches to the open tab and to any tab the login opens later.
+        let attach =
+            json!({ "autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true });
+        self.send("Target.setAutoAttach", attach, None).await?;
+
+        let mut tabs = HashSet::new();
+        let mut navigated = false;
+        while let Some(message) = self.socket.next().await {
+            let Message::Text(text) = message.context("reading from the browser")? else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(&text).context("decoding a browser message")?;
+            let params = &event["params"];
+            let session = params["sessionId"].as_str();
+            match event["method"].as_str() {
+                Some("Target.attachedToTarget") if params["targetInfo"]["type"] == "page" => {
+                    tabs.extend(session.map(str::to_owned));
+                    self.send("Network.enable", json!({}), session).await?;
+                    if !navigated {
+                        navigated = true;
+                        let page = json!({ "url": login_url });
+                        self.send("Page.navigate", page, session).await?;
+                    }
+                }
+                // On macOS the browser keeps running after its last window
+                // closes, so the connection staying open says nothing.
+                Some("Target.detachedFromTarget") => {
+                    if session.is_some_and(|session| tabs.remove(session)) && tabs.is_empty() {
+                        break;
+                    }
+                }
+                Some("Network.requestWillBeSent") => {
+                    let url = params["request"]["url"].as_str().unwrap_or_default();
+                    if let Some(nonce) = callback_nonce(url, callback_url) {
+                        return Ok(nonce);
+                    }
+                }
+                _ => {}
+            }
+        }
+        bail!("the browser was closed before the login finished")
+    }
 }
 
 /// Reads the DevTools WebSocket address the browser writes into its profile
@@ -158,7 +225,8 @@ async fn devtools_endpoint(profile: &Path, child: &mut Child) -> Result<String> 
                 return Ok(format!("ws://127.0.0.1:{port}{path}"));
             }
         }
-        if let Some(status) = child.try_wait()? {
+        // The launcher exiting cleanly leaves the browser running.
+        if let Some(status) = child.try_wait()?.filter(|status| !status.success()) {
             bail!("the browser exited at startup ({status})");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -198,5 +266,15 @@ mod tests {
         let authorize = "https://auth.tunnistus.s-ryhma.fi/oxauth/restv1/authorize?nonce=d25\
                          &redirect_uri=https%3A%2F%2Fkirjautuminen.s-ostoslista.fi%2Fcallback";
         assert_eq!(callback_nonce(authorize, CALLBACK), None);
+    }
+
+    #[test]
+    fn finds_the_app_bundle_of_a_macos_executable() {
+        let chrome = Path::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+        assert_eq!(
+            app_bundle(chrome),
+            Some(Path::new("/Applications/Google Chrome.app"))
+        );
+        assert_eq!(app_bundle(Path::new("/usr/bin/chromium")), None);
     }
 }
