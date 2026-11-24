@@ -174,8 +174,23 @@ it over SSH. This needs [just](https://github.com/casey/just),
 just deploy-pi pi@raspberrypi.local   # installs ~/.local/bin/kassi on the Pi
 ```
 
-Log in over SSH and do the [browser steps](#without-a-browser) on your
-computer:
+The Pi has no browser to log in with, so log in on your computer and move
+the session to the Pi:
+
+```sh
+dir=$(mktemp -d)
+kassi --state-dir "$dir" login
+ssh pi@raspberrypi.local 'mkdir -p -m 700 ~/.local/state/kassi'
+scp "$dir/tokens.json" pi@raspberrypi.local:.local/state/kassi/
+rm -r "$dir"
+```
+
+The temporary directory keeps this login apart from your computer's own. A
+session only works in one place: copying the computer's own `tokens.json`
+would log out whichever machine refreshes it second.
+
+You can also log in on the Pi itself over SSH and do the
+[browser steps](#without-a-browser) on your computer:
 
 ```sh
 ssh -t pi@raspberrypi.local .local/bin/kassi login
