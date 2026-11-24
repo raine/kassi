@@ -134,6 +134,16 @@ public port or HTTPS setup.
    **Tunnel**, pick the tunnel, and set authentication to **No
    authentication**.
 
+ChatGPT keeps the tool list it loaded when you added the server. After
+updating kassi to a version whose tools, tool descriptions, or instructions
+changed, open **Settings → Plugins**, choose the server, press **Refresh
+tools**, and start a new chat; until then ChatGPT works from the old
+descriptions.
+
+kassi logs each tool call with its arguments to stderr, which tunnel-client
+passes on (to the journal when it runs under systemd). That shows which tools
+ChatGPT actually called.
+
 ChatGPT asks for approval before tools that delete things, such as
 `remove_items` and `delete_shopping_list`. Anyone who can use the plugin in
 your ChatGPT workspace can read and change your lists.
