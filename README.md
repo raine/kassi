@@ -27,14 +27,15 @@ Try asking:
 
 - "Add milk and rye bread to my Ruoka list."
 - "What do I usually buy that's missing from my list?"
-- "What time does my store close today?"
+- "When does Prisma Kalasatama close today?"
 - "Show me the route through the store for my list."
 
 Good to know:
 
 - An item is either plain text ("maito") or a product from the store, which
-  has a price and a place in the store. Set a store on your list to get
-  products; only products appear on the route map.
+  has a price and a place in the store. Each list has its own store, which the
+  assistant uses for prices and products. Only products appear on the route
+  map.
 - ChatGPT shows the route map in the chat. Other clients get the walking order
   as text.
 - Reading your purchase history briefly creates an empty list and deletes it
