@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::api::{Api, Item, ItemChanges, ProductItem, SHARE_URL, ShoppingList};
+use crate::storemap::{self, StoreMap, Wanted};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -250,6 +251,22 @@ pub struct Tools {
     /// Purchase history by store id. The mutex also keeps two fetches from
     /// running at once, since each one deletes leftover temporary lists.
     history: Mutex<HashMap<String, (Instant, Arc<History>)>>,
+    /// Indoor maps by store id. Floor plans rarely change, so they are kept
+    /// for as long as the server runs.
+    maps: Mutex<HashMap<String, Arc<StoreMap>>>,
+}
+
+/// A walking route through a store for a shopping list: a summary for the
+/// assistant and a drawing for the user.
+pub struct RouteMap {
+    pub summary: Value,
+    pub svg: String,
+}
+
+impl RouteMap {
+    pub fn png(&self) -> Result<Vec<u8>> {
+        storemap::png(&self.svg)
+    }
 }
 
 /// A store's purchase history as the API returns it, with the ids of its
@@ -286,6 +303,7 @@ impl Tools {
         Self {
             api,
             history: Mutex::new(HashMap::new()),
+            maps: Mutex::new(HashMap::new()),
         }
     }
 
@@ -616,6 +634,81 @@ impl Tools {
             }
         }
         Ok(())
+    }
+
+    /// Orders the list's uncollected items into a walk from the entrance to
+    /// the checkout of the list's store, and draws it on the store map.
+    pub async fn route_map(&self, args: ListArgs) -> Result<RouteMap> {
+        let list = self.resolve(args.list.as_deref()).await?;
+        let Some(store_id) = list.store_id.as_deref() else {
+            bail!("the list has no store; set one with update_shopping_list to plan a route");
+        };
+        let map = self.store_map(store_id).await?;
+        let open: Vec<&Item> = list.items.iter().filter(|item| !item.collected).collect();
+        let wanted: Vec<Wanted> = open
+            .iter()
+            .map(|item| Wanted {
+                names: vec![item.name.clone().unwrap_or_default()],
+                sections: item
+                    .product
+                    .as_ref()
+                    .and_then(|p| p.location.as_ref())
+                    .and_then(|l| l.sections.as_deref())
+                    .map(|codes| codes.split(',').map(str::to_owned).collect())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        let route = map.route(&wanted);
+        let location_of = |name: &str| {
+            open.iter()
+                .find(|item| item.name.as_deref() == Some(name))
+                .map(|item| item_view(item)["location"].clone())
+                .filter(|location| !location.is_null())
+        };
+        let stops: Vec<Value> = route
+            .stops
+            .iter()
+            .enumerate()
+            .map(|(i, stop)| {
+                prune(json!({
+                    "stop": i + 1,
+                    "items": stop.names,
+                    "location": location_of(&stop.names[0]),
+                    "walk_metres": stop.metres_from_previous.round(),
+                }))
+            })
+            .collect();
+        let mut summary = json!({
+            "list": list_summary(&list),
+            "stops": stops,
+            "total_walk_metres": route.total_metres.round(),
+        });
+        if !route.unplaced.is_empty() {
+            summary["not_on_map"] = json!(route.unplaced);
+            summary["note"] = json!(
+                "Free-text items and products without a shelf location cannot be placed on the map."
+            );
+        }
+        Ok(RouteMap {
+            summary,
+            svg: map.svg(&route),
+        })
+    }
+
+    async fn store_map(&self, store_id: &str) -> Result<Arc<StoreMap>> {
+        let mut maps = self.maps.lock().await;
+        if let Some(map) = maps.get(store_id) {
+            return Ok(map.clone());
+        }
+        let layer = |name| self.api.store_map_layer(store_id, name, 1);
+        let (departments, sections, pois) =
+            tokio::try_join!(layer("departments"), layer("sections"), layer("pois"))?;
+        let map = Arc::new(
+            StoreMap::from_layers(&departments, &sections, &pois)
+                .with_context(|| format!("store {store_id} has no usable indoor map"))?,
+        );
+        maps.insert(store_id.to_owned(), map.clone());
+        Ok(map)
     }
 
     pub async fn search_stores(&self, args: SearchStoresArgs) -> Result<Value> {

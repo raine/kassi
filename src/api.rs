@@ -16,6 +16,13 @@ use serde_json::{Value, json};
 
 use crate::auth::Session;
 
+/// S-ryhmä's indoor store map server, which the app shows item locations on.
+const STORE_MAP_URL: &str = "https://storemap.jupa.s-cloud.fi";
+
+/// The app's key for the store map server. The server only accepts it with
+/// a Referer from its own map page.
+const STORE_MAP_KEY: &str = "U2FsdGVkX19gB2t7Y60b9qjh4pr6bmBf7a8aNb16tRU=";
+
 pub const GRAPHQL_URL: &str = "https://api.s-ostoslista.fi/graphql";
 /// The anonymous API key embedded in the S-ostoslista app.
 const PUBLIC_API_KEY: &str = "da2-ivqewtjq3re3nnctbhouukg37m";
@@ -39,7 +46,7 @@ fragment ListFields on ShoppingList {
       quantity
       quantityUnit
       sokId
-      product { pricing { currentPrice } location { aisle label name } }
+      product { pricing { currentPrice } location { aisle label name sections } }
     }
   }
 }";
@@ -153,6 +160,9 @@ pub struct Location {
     pub aisle: Option<String>,
     pub label: Option<String>,
     pub name: Option<String>,
+    /// Comma-separated codes of the shelf sections holding the product, as
+    /// named in the store map's sections layer.
+    pub sections: Option<String>,
 }
 
 /// Fields to change on an item; unset fields are left as they are.
@@ -335,6 +345,28 @@ impl Api {
     ) -> Result<ShoppingList> {
         self.field(&format!("{mutation}{LIST_FIELDS}"), variables, field)
             .await
+    }
+
+    /// One GeoJSON layer of a store's indoor map, such as `departments`,
+    /// `sections`, or `pois`, for one floor.
+    pub async fn store_map_layer(&self, store_id: &str, layer: &str, floor: i64) -> Result<Value> {
+        let referer = format!("{STORE_MAP_URL}/indoor/v1/?apiKey={STORE_MAP_KEY}&s={store_id}");
+        let url = url::Url::parse_with_params(
+            &format!("{STORE_MAP_URL}/api/store/{store_id}/layer/{layer}/{floor}/1"),
+            [("apiKey", STORE_MAP_KEY)],
+        )?;
+        let response = self
+            .http
+            .get(url)
+            .header(reqwest::header::REFERER, referer)
+            .send()
+            .await
+            .with_context(|| format!("store map layer {layer}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            bail!("store map layer {layer} for store {store_id}: HTTP {status}");
+        }
+        Ok(response.json().await?)
     }
 
     pub async fn user_name(&self) -> Result<Option<String>> {

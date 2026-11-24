@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; font-family: system-ui, sans-serif; }
+  #map { width: 100%; overflow: auto; touch-action: pan-x pan-y pinch-zoom; }
+  #map svg { display: block; width: 100%; height: auto; }
+  #stops { margin: 8px 12px 12px; padding: 0; list-style: none; font-size: 14px; color: #222; }
+  #stops li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+  #stops b { flex: none; width: 20px; height: 20px; border-radius: 50%; background: #e4002b;
+             color: #fff; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+  #empty { padding: 16px; color: #666; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="map"><div id="empty">Ladataan karttaa…</div></div>
+<ol id="stops"></ol>
+<script>
+  // Draws the route from a kassi show_route_map result: the SVG comes in the
+  // result's _meta, which ChatGPT passes to this view but not to the model.
+  function show(output, meta) {
+    const svg = meta && meta["kassi/svg"];
+    if (!svg) return false;
+    document.getElementById("map").innerHTML = svg;
+    const list = document.getElementById("stops");
+    list.innerHTML = "";
+    for (const stop of (output && output.stops) || []) {
+      const li = document.createElement("li");
+      const n = document.createElement("b");
+      n.textContent = stop.stop;
+      const text = document.createElement("span");
+      text.textContent = stop.items.join(", ");
+      li.append(n, text);
+      list.append(li);
+    }
+    if (window.openai && window.openai.notifyIntrinsicHeight) {
+      window.openai.notifyIntrinsicHeight(document.body.scrollHeight);
+    }
+    return true;
+  }
+
+  function fromGlobals() {
+    const o = window.openai;
+    return o && show(o.toolOutput, o.toolResponseMetadata);
+  }
+
+  window.addEventListener("openai:set_globals", fromGlobals);
+  // Hosts that follow the MCP Apps protocol send the result as a message.
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (data && data.method === "ui/notifications/tool-result" && data.params) {
+      show(data.params.structuredContent, data.params._meta);
+    }
+  });
+  fromGlobals();
+</script>
+</body>
+</html>

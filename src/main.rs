@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod mcp;
+mod storemap;
 
 use std::io::{BufRead, Write};
 use std::net::SocketAddr;
