@@ -8,6 +8,8 @@ shopping lists.
 kassi uses your S-ryhmä account. It is unofficial and depends on an
 undocumented API that may change.
 
+https://github.com/user-attachments/assets/fa19e33d-4c75-4ab8-9b46-98e2ea7a447f
+
 ## What the assistant can do
 
 - **Lists:** view, create, rename, copy, and delete lists, set a list's store,
