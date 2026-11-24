@@ -27,8 +27,11 @@ shelf name.
 
 `purchase_history` lists what you have bought with your S-Etukortti, by
 category, as products at a chosen store with current prices. The API only
-offers this as suggestions for a list, so the tool briefly creates an empty
-list with that store and deletes it again.
+offers this as suggestions for a list, so kassi briefly creates an empty list
+with that store and deletes it again. Product search in a store uses the same
+history: products you have bought come first and are marked `bought_before`.
+kassi keeps a store's history for an hour, so only the first search there pays
+for the temporary list.
 
 ## Install
 

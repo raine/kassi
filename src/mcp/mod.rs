@@ -33,7 +33,8 @@ invent ids.
 - Items are either free text (add_items) or store products (add_products) with \
 a price and a location: an aisle number or a department, plus the shelf. Use \
 free text unless the user wants a specific product or asks about prices. To \
-pick a product, search_products with the list's store_id.
+pick a product, search_products with the list's store_id; unless the user \
+asks for something else, prefer a result marked bought_before.
 - Check items off with update_items (collected: true) rather than removing \
 them, unless the user asks to remove them.
 - Product names and searches are in Finnish; translate the user's request into \
@@ -275,7 +276,7 @@ impl Server {
     // Products
 
     #[tool(
-        description = "Search products by name. With store_id: that store's prices, campaigns, availability, and location in the store. Without: the whole S-ryhmä assortment.",
+        description = "Search products by name. With store_id: that store's prices, campaigns, availability, and location in the store, with products the user has bought before (from their S-Etukortti history) first and marked bought_before. Without: the whole S-ryhmä assortment.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_products(

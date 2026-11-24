@@ -1,11 +1,14 @@
 //! Tool implementations, independent of the MCP transport.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use tokio::sync::Mutex;
 
 use crate::api::{Api, Item, ItemChanges, ProductItem, SHARE_URL, ShoppingList};
 
@@ -217,7 +220,18 @@ pub struct SearchStoresArgs {
 /// The API's upper limit for `numOfRecommendations`.
 const MAX_RECOMMENDATIONS: u32 = 500;
 
-/// Name of the empty list purchase_history creates and deletes again.
+/// Products per category fetched for purchase history; purchase_history
+/// trims this to what the caller asked for.
+const HISTORY_PER_CATEGORY: u32 = 50;
+
+/// How long a store's purchase history is reused before fetching it again.
+const HISTORY_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// Search results fetched on the first page so that previously bought
+/// products ranked below the requested limit can still be moved up.
+const SEARCH_WINDOW: u32 = 50;
+
+/// Name of the empty list created and deleted again to read purchase history.
 const TEMPORARY_LIST_NAME: &str = "kassi: ostohistoria (väliaikainen)";
 
 const BRANDS: &[&str] = &[
@@ -233,11 +247,46 @@ const BRANDS: &[&str] = &[
 
 pub struct Tools {
     api: Api,
+    /// Purchase history by store id. The mutex also keeps two fetches from
+    /// running at once, since each one deletes leftover temporary lists.
+    history: Mutex<HashMap<String, (Instant, Arc<History>)>>,
+}
+
+/// A store's purchase history as the API returns it, with the ids of its
+/// products for quick lookups.
+struct History {
+    recommendations: Value,
+    product_ids: HashSet<String>,
+}
+
+impl History {
+    fn new(recommendations: Value) -> Self {
+        let product_ids = recommendations["groups"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|group| group["products"].as_array().into_iter().flatten())
+            .filter_map(|product| product["id"].as_str().map(str::to_owned))
+            .collect();
+        Self {
+            recommendations,
+            product_ids,
+        }
+    }
+
+    fn contains(&self, product: &Value) -> bool {
+        product["id"]
+            .as_str()
+            .is_some_and(|id| self.product_ids.contains(id))
+    }
 }
 
 impl Tools {
     pub fn new(api: Api) -> Self {
-        Self { api }
+        Self {
+            api,
+            history: Mutex::new(HashMap::new()),
+        }
     }
 
     pub async fn list_shopping_lists(&self) -> Result<Value> {
@@ -426,21 +475,46 @@ impl Tools {
     pub async fn search_products(&self, args: SearchProductsArgs) -> Result<Value> {
         let query = required("query", &args.query)?;
         let limit = args.limit.unwrap_or(10).clamp(1, 50);
+        let offset = args.offset.unwrap_or(0);
         let store_id = optional(args.store_id.as_deref());
+        let history = match store_id {
+            Some(store_id) => match self.store_history(store_id).await {
+                Ok(history) => Some(history),
+                Err(error) => {
+                    tracing::warn!("searching without purchase history: {error:#}");
+                    None
+                }
+            },
+            None => None,
+        };
+        // On the first page, look further than the limit so that products
+        // the user has bought can be moved to the top.
+        let window = if history.is_some() && offset == 0 {
+            limit.max(SEARCH_WINDOW)
+        } else {
+            limit
+        };
         let page = self
             .api
-            .search_products(query, store_id, args.offset.unwrap_or(0), limit)
+            .search_products(query, store_id, offset, window)
             .await?;
-        let products: Vec<_> = page["items"]
-            .as_array()
+        let items = page["items"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let more = page["maybeHasMore"].as_bool().unwrap_or(false) || items.len() > limit as usize;
+        let products: Vec<_> = bought_first(items, history.as_deref())
             .into_iter()
-            .flatten()
-            .map(|product| scoped(product_view(product), store_id))
+            .take(limit as usize)
+            .map(|(product, bought)| {
+                let mut view = scoped(product_view(product), store_id);
+                if bought {
+                    view["bought_before"] = json!(true);
+                }
+                view
+            })
             .collect();
         Ok(prune(json!({
             "store_id": store_id,
             "products": products,
-            "more": page["maybeHasMore"].as_bool().unwrap_or(false),
+            "more": more,
         })))
     }
 
@@ -474,30 +548,24 @@ impl Tools {
         }))
     }
 
-    /// The API exposes card purchase history only as suggestions for a list,
-    /// so this reads them from an empty temporary list for the store.
     pub async fn purchase_history(&self, args: PurchaseHistoryArgs) -> Result<Value> {
         let store_id = required("store_id", &args.store_id)?;
-        let per_category = args.per_category.unwrap_or(20).clamp(1, 50);
-        self.delete_leftover_temporary_lists().await?;
-        let list = self
-            .api
-            .create_list(TEMPORARY_LIST_NAME, Some(store_id), &[])
-            .await?;
-        let history = self
-            .api
-            .recommendations(&list.id, per_category, MAX_RECOMMENDATIONS)
-            .await;
-        let deleted = self.api.delete_list(&list.id).await;
-        let history = history?;
-        if let Err(error) = deleted {
-            tracing::warn!("could not delete temporary list {}: {error:#}", list.id);
+        let per_category = args
+            .per_category
+            .unwrap_or(20)
+            .clamp(1, HISTORY_PER_CATEGORY);
+        let history = self.store_history(store_id).await?;
+        let source = history_source(&history.recommendations);
+        let mut categories = groups_view(&history.recommendations, history_product_view);
+        for category in &mut categories {
+            if let Some(products) = category["products"].as_array_mut() {
+                products.truncate(per_category as usize);
+            }
         }
-        let source = history_source(&history);
         let mut result = json!({
             "store_id": store_id,
             "based_on": source,
-            "categories": groups_view(&history, history_product_view),
+            "categories": categories,
         });
         if source != "card_purchases" {
             result["note"] = json!(
@@ -507,7 +575,40 @@ impl Tools {
         Ok(result)
     }
 
-    /// Removes temporary lists that a crashed purchase_history call left.
+    /// The user's purchase history as products at a store, reused for
+    /// `HISTORY_TTL`.
+    async fn store_history(&self, store_id: &str) -> Result<Arc<History>> {
+        let mut cache = self.history.lock().await;
+        if let Some((fetched, history)) = cache.get(store_id)
+            && fetched.elapsed() < HISTORY_TTL
+        {
+            return Ok(history.clone());
+        }
+        let history = Arc::new(History::new(self.fetch_history(store_id).await?));
+        cache.insert(store_id.to_owned(), (Instant::now(), history.clone()));
+        Ok(history)
+    }
+
+    /// The API exposes card purchase history only as suggestions for a list,
+    /// and only an empty list gets the plain history, so this reads it from
+    /// an empty temporary list for the store.
+    async fn fetch_history(&self, store_id: &str) -> Result<Value> {
+        self.delete_leftover_temporary_lists().await?;
+        let list = self
+            .api
+            .create_list(TEMPORARY_LIST_NAME, Some(store_id), &[])
+            .await?;
+        let history = self
+            .api
+            .recommendations(&list.id, HISTORY_PER_CATEGORY, MAX_RECOMMENDATIONS)
+            .await;
+        if let Err(error) = self.api.delete_list(&list.id).await {
+            tracing::warn!("could not delete temporary list {}: {error:#}", list.id);
+        }
+        history
+    }
+
+    /// Removes temporary lists that an interrupted history fetch left.
     async fn delete_leftover_temporary_lists(&self) -> Result<()> {
         for list in self.api.shopping_lists().await? {
             if list.name == TEMPORARY_LIST_NAME && list.items.is_empty() {
@@ -710,6 +811,17 @@ fn history_source(recommendations: &Value) -> &'static str {
         Some("S_OSTOSLISTA") => "app_checked_items",
         _ => "unknown",
     }
+}
+
+/// Search results with the products in `history` moved to the front, each
+/// paired with whether it is one of them. The order is otherwise kept.
+fn bought_first<'a>(items: &'a [Value], history: Option<&History>) -> Vec<(&'a Value, bool)> {
+    let mut marked: Vec<_> = items
+        .iter()
+        .map(|product| (product, history.is_some_and(|h| h.contains(product))))
+        .collect();
+    marked.sort_by_key(|(_, bought)| !bought);
+    marked
 }
 
 fn groups_view(recommendations: &Value, view: fn(&Value) -> Value) -> Vec<Value> {
@@ -1046,6 +1158,27 @@ mod tests {
             history_source(&json!({ "historySource": "S_OSTOSLISTA" })),
             "app_checked_items"
         );
+    }
+
+    #[test]
+    fn bought_products_move_to_the_front_in_search_order() {
+        let history = History::new(json!({
+            "groups": [{ "products": [{ "id": "3" }, { "id": "5" }] }]
+        }));
+        let items: Vec<_> = (1..=5).map(|id| json!({ "id": id.to_string() })).collect();
+        let order: Vec<_> = bought_first(&items, Some(&history))
+            .into_iter()
+            .map(|(product, bought)| (product["id"].as_str().unwrap().to_owned(), bought))
+            .collect();
+        let expected = [
+            ("3", true),
+            ("5", true),
+            ("1", false),
+            ("2", false),
+            ("4", false),
+        ];
+        assert_eq!(order, expected.map(|(id, b)| (id.to_owned(), b)));
+        assert!(bought_first(&items, None).iter().all(|(_, bought)| !bought));
     }
 
     #[test]
