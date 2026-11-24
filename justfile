@@ -82,7 +82,9 @@ build-pi:
     cargo zigbuild --locked --release --target {{pi_target}}
     @echo "target/{{pi_target}}/release/kassi"
 
-# Build for the Pi and copy the binary to HOST:~/.local/bin/kassi
+# Build for the Pi and install the binary as HOST:~/.local/bin/kassi
 deploy-pi host: build-pi
     ssh "$1" 'mkdir -p ~/.local/bin'
-    scp "target/{{pi_target}}/release/kassi" "$1:.local/bin/kassi"
+    scp "target/{{pi_target}}/release/kassi" "$1:.local/bin/kassi.new"
+    @# A rename replaces the binary even while kassi is running from it.
+    ssh "$1" 'mv ~/.local/bin/kassi.new ~/.local/bin/kassi'
