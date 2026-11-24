@@ -58,8 +58,15 @@ To run kassi on a Raspberry Pi instead, see [Raspberry Pi](#raspberry-pi).
 kassi login
 ```
 
-The S-ryhmä login has a captcha, so you log in with a browser and give the
-result to kassi:
+kassi opens a browser window for the login and closes it when you are done.
+The window is a fresh profile of Chrome or another Chromium-based browser, so
+your saved passwords are not available in it. Set `KASSI_BROWSER` to the
+browser's executable to pick which one is used.
+
+### Without a browser
+
+On a machine with no Chromium-based browser, or with `kassi login --paste`,
+you log in with a browser on any computer and give the result to kassi:
 
 1. In a desktop browser, open a new tab, open DevTools on the Network tab, and
    enable **Preserve log**.
@@ -67,6 +74,8 @@ result to kassi:
 3. The login ends on a blank page. In the Network tab, find the
    `callback?nonce=…` request and copy its URL.
 4. Paste the URL into `kassi login` within a few minutes.
+
+### After logging in
 
 Check that it works:
 
@@ -165,7 +174,8 @@ it over SSH. This needs [just](https://github.com/casey/just),
 just deploy-pi pi@raspberrypi.local   # installs ~/.local/bin/kassi on the Pi
 ```
 
-Log in over SSH and do the browser steps on your computer:
+Log in over SSH and do the [browser steps](#without-a-browser) on your
+computer:
 
 ```sh
 ssh -t pi@raspberrypi.local .local/bin/kassi login

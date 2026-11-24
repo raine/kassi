@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod browser;
 mod mcp;
 mod storemap;
 
@@ -33,7 +34,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Log in with an S-ryhmä account and save the session.
-    Login,
+    Login {
+        /// Paste the login's callback URL instead of logging in through a
+        /// browser window that kassi opens. For machines without a browser.
+        #[arg(long)]
+        paste: bool,
+    },
     /// Serve MCP on stdio, or on Streamable HTTP with --http.
     Mcp {
         /// Serve Streamable HTTP at /mcp instead of stdio. Requires
@@ -75,7 +81,7 @@ async fn main() -> Result<()> {
         .build()?;
 
     match cli.command {
-        Command::Login => login(http, token_file).await,
+        Command::Login { paste } => login(http, token_file, paste).await,
         Command::Mcp {
             http: serve_http,
             bind,
@@ -112,7 +118,39 @@ fn print_json(value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-async fn login(http: reqwest::Client, token_file: TokenFile) -> Result<()> {
+async fn login(http: reqwest::Client, token_file: TokenFile, paste: bool) -> Result<()> {
+    let nonce = match browser::find().filter(|_| !paste) {
+        Some(browser) => {
+            eprintln!("Log in with your S-ryhmä account in the browser window that opens.");
+            let login_url = format!("{AUTH_URL}/login");
+            let callback_url = format!("{AUTH_URL}/callback");
+            browser::login_nonce(&browser, &login_url, &callback_url).await?
+        }
+        None => {
+            if !paste {
+                eprintln!("No Chromium-based browser found (set KASSI_BROWSER to use one).\n");
+            }
+            pasted_nonce()?
+        }
+    };
+    let tokens = auth::verify_nonce(&http, &nonce).await?;
+    token_file.save(&tokens)?;
+
+    let api = open_api(http, token_file.clone())?;
+    let name = api
+        .user_name()
+        .await
+        .context("logged in, but the API rejected the session")?;
+    eprintln!(
+        "Logged in{}. Session saved to {}",
+        name.map(|n| format!(" as {n}")).unwrap_or_default(),
+        token_file.path().display()
+    );
+    Ok(())
+}
+
+/// Asks for the callback URL of a login done by hand in the user's own browser.
+fn pasted_nonce() -> Result<String> {
     eprintln!(
         "\
 Log in with a desktop browser:
@@ -132,19 +170,5 @@ Log in with a desktop browser:
         .lock()
         .read_line(&mut line)
         .context("reading the callback URL")?;
-    let nonce = auth::parse_nonce(&line)?;
-    let tokens = auth::verify_nonce(&http, &nonce).await?;
-    token_file.save(&tokens)?;
-
-    let api = open_api(http, token_file.clone())?;
-    let name = api
-        .user_name()
-        .await
-        .context("logged in, but the API rejected the session")?;
-    eprintln!(
-        "Logged in{}. Session saved to {}",
-        name.map(|n| format!(" as {n}")).unwrap_or_default(),
-        token_file.path().display()
-    );
-    Ok(())
+    auth::parse_nonce(&line)
 }
