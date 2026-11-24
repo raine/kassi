@@ -912,6 +912,7 @@ fn item_view(item: &Item) -> Value {
         "unit": item.quantity_unit,
         "product_id": item.sok_id,
         "ean": item.ean,
+        "image_url": item.sok_id.as_ref().and(item.ean.as_deref()).and_then(image_url),
         "price_eur": product
             .and_then(|p| p.pricing.as_ref())
             .and_then(|pricing| pricing.current_price),
@@ -991,6 +992,13 @@ fn history_product_view(product: &Value) -> Value {
 }
 
 /// A compact product row: identity, price, and where to find it.
+/// The product's picture on S-ryhmä's public image CDN, which serves it by
+/// barcode.
+fn image_url(ean: &str) -> Option<String> {
+    (!ean.is_empty() && ean.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| format!("https://cdn.s-cloud.fi/v1/w384_q60/product/ean/{ean}_kuva1.jpg"))
+}
+
 fn product_view(product: &Value) -> Value {
     let pricing = &product["pricing"];
     let price = pricing["currentPrice"].as_f64();
@@ -1001,6 +1009,7 @@ fn product_view(product: &Value) -> Value {
         "id": product["id"],
         "ean": product["ean"],
         "name": product["name"],
+        "image_url": product["ean"].as_str().and_then(image_url),
         "brand": product["brandName"],
         "price_eur": price,
         "price_unit": product["priceUnit"],
@@ -1238,6 +1247,10 @@ mod tests {
         assert_eq!(view["campaign_until"], "2026-11-30");
         assert_eq!(view["lowest_30_day_price_eur"], 7.99);
         assert_eq!(view["location"], json!({ "aisle": "12", "shelf": "Kahvi" }));
+        assert_eq!(
+            view["image_url"],
+            "https://cdn.s-cloud.fi/v1/w384_q60/product/ean/2_kuva1.jpg"
+        );
         for hidden in ["brand", "available", "approximate_price", "deposit_eur"] {
             assert!(view.get(hidden).is_none(), "{hidden}: {view}");
         }
