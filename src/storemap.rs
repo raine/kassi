@@ -21,6 +21,9 @@ const ROUTE_END_POI: &str = "5ab9d3125908010006d16e37";
 const ENTRANCE_POI: &str = "5ac47a15cff47e0006271d7e";
 const CHECKOUT_POI: &str = "5ac479eccff47e0006271d7d";
 
+const PRISMA_KAARI: &str = "513971200";
+const KAARI_GROCERY_ENTRANCE: &str = "3aff23ab-7210-4d25-ba16-4ca972488d57";
+
 /// Stops closer than this, in metres, are walked as one.
 const SAME_STOP_METRES: f64 = 3.0;
 
@@ -81,7 +84,12 @@ pub struct Route {
 
 impl StoreMap {
     /// Builds the map from the `departments`, `sections`, and `pois` layers.
-    pub fn from_layers(departments: &Value, sections: &Value, pois: &Value) -> Result<Self> {
+    pub fn from_layers(
+        store_id: &str,
+        departments: &Value,
+        sections: &Value,
+        pois: &Value,
+    ) -> Result<Self> {
         let origin = Origin::of(departments).context("the store map has no departments")?;
         let departments = features(departments)
             .map(|feature| Area {
@@ -109,17 +117,22 @@ impl StoreMap {
             .into_iter()
             .map(|(name, points)| (name, centre(&points)))
             .collect();
-        let poi = |type_id: &str| {
+        let poi = |key: &str, id: &str| {
             features(pois)
-                .find(|feature| feature["properties"]["typeId"] == type_id)
+                .find(|feature| feature["properties"][key] == id)
                 .and_then(|feature| point(&feature["geometry"]["coordinates"], &origin))
         };
         let mut map = Self {
             departments,
             shelves,
             sections,
-            entrance: poi(ROUTE_START_POI).or_else(|| poi(ENTRANCE_POI)),
-            checkout: poi(ROUTE_END_POI).or_else(|| poi(CHECKOUT_POI)),
+            entrance: match store_id {
+                PRISMA_KAARI => poi("id", KAARI_GROCERY_ENTRANCE),
+                _ => None,
+            }
+            .or_else(|| poi("typeId", ROUTE_START_POI))
+            .or_else(|| poi("typeId", ENTRANCE_POI)),
+            checkout: poi("typeId", ROUTE_END_POI).or_else(|| poi("typeId", CHECKOUT_POI)),
             width: 0.0,
             height: 0.0,
         };
@@ -437,6 +450,10 @@ mod tests {
     }
 
     fn map() -> StoreMap {
+        test_map("other", None)
+    }
+
+    fn test_map(store_id: &str, door_id: Option<&str>) -> StoreMap {
         let departments = json!({ "features": [{
             "properties": { "name": "PÄIVITTÄISTAVARA" },
             "geometry": { "type": "Polygon", "coordinates": square(25.0, 62.0, 0.002) }
@@ -456,9 +473,18 @@ mod tests {
                 "geometry": { "type": "Point", "coordinates": [lon, 61.9985] }
             })
         };
-        let pois =
-            json!({ "features": [poi(ROUTE_START_POI, 25.0001), poi(ROUTE_END_POI, 25.0019)] });
-        StoreMap::from_layers(&departments, &sections, &pois).unwrap()
+        let mut door = poi(ENTRANCE_POI, 25.0017);
+        door["properties"]["id"] = json!(door_id);
+        let pois = json!({ "features": [poi(ROUTE_START_POI, 25.0001), poi(ROUTE_END_POI, 25.0019), door] });
+        StoreMap::from_layers(store_id, &departments, &sections, &pois).unwrap()
+    }
+
+    #[test]
+    fn kaari_prefers_the_grocery_entrance_when_present() {
+        let other = test_map("other", Some(KAARI_GROCERY_ENTRANCE));
+        assert_eq!(test_map(PRISMA_KAARI, None).entrance, other.entrance);
+        let kaari = test_map(PRISMA_KAARI, Some(KAARI_GROCERY_ENTRANCE));
+        assert!(kaari.entrance.unwrap().x > other.entrance.unwrap().x);
     }
 
     fn wanted(name: &str, section: &str) -> Wanted {
@@ -501,8 +527,13 @@ mod tests {
             serde_json::from_slice(&std::fs::read(dir.join(format!("{name}.json"))).unwrap())
                 .unwrap()
         };
-        let map = StoreMap::from_layers(&layer("departments"), &layer("sections"), &layer("pois"))
-            .unwrap();
+        let map = StoreMap::from_layers(
+            &std::env::var("KASSI_MAP_STORE_ID").unwrap_or_default(),
+            &layer("departments"),
+            &layer("sections"),
+            &layer("pois"),
+        )
+        .unwrap();
         let wanted: Vec<Wanted> = std::env::var("KASSI_MAP_ITEMS")
             .unwrap()
             .split(';')

@@ -739,7 +739,7 @@ impl Tools {
         let (departments, sections, pois) =
             tokio::try_join!(layer("departments"), layer("sections"), layer("pois"))?;
         let map = Arc::new(
-            StoreMap::from_layers(&departments, &sections, &pois)
+            StoreMap::from_layers(store_id, &departments, &sections, &pois)
                 .with_context(|| format!("store {store_id} has no usable indoor map"))?,
         );
         maps.insert(store_id.to_owned(), map.clone());
