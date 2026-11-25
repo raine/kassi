@@ -50,13 +50,24 @@ Good to know:
 
 ## Install
 
-With Rust 1.96 or newer, run in this repository:
+On macOS or Linux (amd64 or arm64), install the latest release binary:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/raine/kassi/main/scripts/install | bash
+```
+
+The script installs `kassi` into `/usr/local/bin` when that is writable, and
+`~/.local/bin` otherwise. Set `KASSI_INSTALL_DIR` to pick another directory, or
+`KASSI_VERSION` (such as `v0.1.1`) to pin a version. The binaries are also on
+the [releases page](https://github.com/raine/kassi/releases).
+
+To build from source instead, with Rust 1.96 or newer, run in this repository:
 
 ```sh
 cargo install --locked --path .
 ```
 
-To run kassi on a Raspberry Pi instead, see [Raspberry Pi](#raspberry-pi).
+To run kassi on a Raspberry Pi, see [Raspberry Pi](#raspberry-pi).
 
 ## Log in
 
@@ -175,8 +186,9 @@ like a password.
 
 ## Raspberry Pi
 
-kassi runs well on a Pi with a 64-bit OS. Build it on your computer and copy it
-over SSH. This needs [just](https://github.com/casey/just),
+kassi runs well on a Pi with a 64-bit OS. The install script above works on
+it. To run your own build instead, build it on your computer and copy it over
+SSH. This needs [just](https://github.com/casey/just),
 [zig](https://ziglang.org), and `cargo-zigbuild` 0.24 or newer.
 
 ```sh

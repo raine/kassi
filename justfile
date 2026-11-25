@@ -77,6 +77,21 @@ test-filter filter:
 install:
     cargo install --locked --path .
 
+# Install the latest release binary into ~/.cargo/bin
+install-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    install_root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}"
+    KASSI_INSTALL_DIR="$install_root/bin" bash scripts/install
+
+# Release a new patch version; the pushed tag builds the GitHub release
+release *ARGS:
+    @cargo-release patch --skip-publish "$@"
+
+# Release a new minor version
+release-minor *ARGS:
+    @cargo-release minor --skip-publish "$@"
+
 # Build a static Raspberry Pi (64-bit) binary with cargo-zigbuild
 build-pi:
     cargo zigbuild --locked --release --target {{pi_target}}
