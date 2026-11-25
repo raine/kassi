@@ -411,6 +411,24 @@ impl Server {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Server {
+    async fn initialize(
+        &self,
+        request: rmcp::model::InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::InitializeResult, ErrorData> {
+        // What a client can do (elicitation, extensions) differs per client
+        // and is only declared here.
+        tracing::info!(
+            client = %request.client_info.name,
+            version = %request.client_info.version,
+            protocol = %request.protocol_version,
+            capabilities = %serde_json::to_value(&request.capabilities).unwrap_or_default(),
+            "client connected"
+        );
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
