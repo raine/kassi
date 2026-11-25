@@ -13,6 +13,7 @@ axum = "0.8"
 base64 = "0.22"
 clap = { version = "4.6", features = ["derive", "env"] }
 futures-util = "0.3.34"
+miniz_oxide = "0.9.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 schemars = "1.2"

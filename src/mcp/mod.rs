@@ -216,6 +216,17 @@ impl Server {
     }
 
     #[tool(
+        description = "Make a link to the S-kaupat online store (s-kaupat.fi) for ordering a list's uncollected products for delivery or pickup. The link opens a page showing the products with a button that adds them all to the cart. The user finishes and pays for the order there; this places no order. Free-text items are left out and reported.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn order_link(
+        &self,
+        Parameters(args): Parameters<ListArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        tool_result(self.tools.order_link(args).await)
+    }
+
+    #[tool(
         description = "Join a shopping list someone shared, from its https://s-ostoslista.fi/liity/... link.",
         annotations(
             read_only_hint = false,

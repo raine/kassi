@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod browser;
 mod mcp;
+mod skaupat;
 mod storemap;
 
 use std::io::{BufRead, Write};

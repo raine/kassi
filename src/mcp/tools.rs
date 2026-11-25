@@ -11,6 +11,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::api::{Api, Item, ItemChanges, ProductItem, SHARE_URL, ShoppingList};
+use crate::skaupat::{CartItem, cart_link};
 use crate::storemap::{StoreMap, Wanted};
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -378,6 +379,37 @@ impl Tools {
             "url": url,
             "note": "Anyone who opens the link in the S-ostoslista app can view, edit, and reshare the list for a year.",
         }))
+    }
+
+    pub async fn order_link(&self, args: ListArgs) -> Result<Value> {
+        let list = self.resolve(args.list.as_deref()).await?;
+        let open = || list.items.iter().filter(|item| !item.collected);
+        let products: Vec<_> = open()
+            .filter_map(|item| {
+                Some(CartItem {
+                    id: item.sok_id.clone()?,
+                    quantity: item.quantity.unwrap_or(1.0),
+                    unit: item.quantity_unit.clone(),
+                })
+            })
+            .collect();
+        if products.is_empty() {
+            bail!(
+                "list {:?} has no uncollected products to order; free-text items cannot be ordered",
+                list.name
+            );
+        }
+        let left_out: Vec<_> = open()
+            .filter(|item| item.sok_id.is_none())
+            .filter_map(|item| item.name.clone())
+            .collect();
+        Ok(prune(json!({
+            "list": list_summary(&list),
+            "url": cart_link(&list.name, &products),
+            "products": products.len(),
+            "left_out": left_out,
+            "note": "The link opens a page on s-kaupat.fi that shows the products; the user adds them to the cart there with \"Lisää kaikki ostoskoriin\". Nothing is ordered until they pick a store and a time and pay.",
+        })))
     }
 
     pub async fn join_shared_list(&self, args: JoinListArgs) -> Result<Value> {

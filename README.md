@@ -25,6 +25,9 @@ https://github.com/user-attachments/assets/fa19e33d-4c75-4ab8-9b46-98e2ea7a447f
 - Find stores and their address, opening hours, and services.
 - Order a list's products into a walk from the entrance to the checkout, drawn
   on the store's floor plan.
+- Turn a list into a link to the S-kaupat online store, where one click adds
+  the list's products to your cart. You pick the store and time and pay there
+  yourself; kassi does not place orders.
 
 Try asking:
 
@@ -32,6 +35,7 @@ Try asking:
 - "What do I usually buy that's missing from my list?"
 - "When does Prisma Kalasatama close today?"
 - "Show me the route through the store for my list."
+- "Give me a link to order my list from S-kaupat."
 
 Good to know:
 
@@ -250,6 +254,7 @@ each other out.
 | `delete_shopping_list`    | Deletes a list and its items                                             |
 | `share_shopping_list`     | Creates a link that lets someone else open and edit a list               |
 | `join_shared_list`        | Joins a list from its share link                                         |
+| `order_link`              | Makes an s-kaupat.fi link for adding a list's products to the cart       |
 | `add_items`               | Adds notes to a list                                                     |
 | `add_products`            | Adds products to a list, with quantities                                 |
 | `update_items`            | Checks items off or back on, renames them, or sets quantities            |
